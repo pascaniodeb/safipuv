@@ -102,8 +102,8 @@ class PastorResource extends Resource
                                             ->maxLength(255)
                                             ->disabled(function () {
                                                 // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                                return !Auth::user()->hasAnyRole(['
-                                                    Administrador',
+                                                return !Auth::user()->hasAnyRole([
+                                                    'Administrador',
                                                     'Secretario Nacional',
                                                     'Tesorero Nacional',
                                                     'Secretario Regional',
@@ -117,8 +117,8 @@ class PastorResource extends Resource
                                             ->maxLength(255)
                                             ->disabled(function () {
                                                 // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                                return !Auth::user()->hasAnyRole(['
-                                                    Administrador',
+                                                return !Auth::user()->hasAnyRole([
+                                                    'Administrador',
                                                     'Secretario Nacional',
                                                     'Tesorero Nacional',
                                                     'Secretario Regional',
@@ -132,8 +132,8 @@ class PastorResource extends Resource
                                             ->required()
                                             ->disabled(function () {
                                                 // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                                return !Auth::user()->hasAnyRole(['
-                                                    Administrador',
+                                                return !Auth::user()->hasAnyRole([
+                                                    'Administrador',
                                                     'Secretario Nacional',
                                                     'Tesorero Nacional',
                                                     'Secretario Regional',
@@ -147,8 +147,8 @@ class PastorResource extends Resource
                                             ->maxLength(255)
                                             ->disabled(function () {
                                                 // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                                return !Auth::user()->hasAnyRole(['
-                                                    Administrador',
+                                                return !Auth::user()->hasAnyRole([
+                                                    'Administrador',
                                                     'Secretario Nacional',
                                                     'Tesorero Nacional', 
                                                 ]);
@@ -168,12 +168,6 @@ class PastorResource extends Resource
                                     ->image() // Acepta solo imágenes
                                     ->maxSize(2048) // Tamaño máximo en KB
                                     ->nullable(), // Permite que sea opcional
-
-
-                                    
-
-
-
 
                             ])
                             ->columnSpan(1), // Ocupa 1 columna del grid principal
@@ -231,8 +225,8 @@ class PastorResource extends Resource
                                 ->columnSpan(['default' => 3, 'md' => 1])
                                 ->disabled(function () {
                                     // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole(['
-                                        Administrador',
+                                    return !Auth::user()->hasAnyRole([
+                                        'Administrador',
                                         'Secretario Nacional',
                                         'Tesorero Nacional',
                                     ]);
@@ -259,8 +253,8 @@ class PastorResource extends Resource
                                     ->columnSpan(['default' => 3, 'md' => 1])
                                     ->disabled(function () {
                                         // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                        return !Auth::user()->hasAnyRole(['
-                                            Administrador',
+                                        return !Auth::user()->hasAnyRole([
+                                            'Administrador',
                                             'Secretario Nacional',
                                             'Tesorero Nacional',
                                             'Secretario Regional',
@@ -280,8 +274,8 @@ class PastorResource extends Resource
                                     ->columnSpan(['default' => 3, 'md' => 1])
                                     ->disabled(function () {
                                         // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                        return !Auth::user()->hasAnyRole(['
-                                            Administrador',
+                                        return !Auth::user()->hasAnyRole([
+                                            'Administrador',
                                             'Secretario Nacional',
                                             'Tesorero Nacional',
                                             'Secretario Regional',
@@ -299,8 +293,8 @@ class PastorResource extends Resource
                                     ->columnSpan(['default' => 3, 'md' => 1])
                                     ->disabled(function () {
                                         // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                        return !Auth::user()->hasAnyRole(['
-                                            Administrador',
+                                        return !Auth::user()->hasAnyRole([
+                                            'Administrador',
                                             'Secretario Nacional',
                                             'Tesorero Nacional',
                                             'Secretario Regional',
@@ -645,6 +639,7 @@ class PastorResource extends Resource
                     }),
             ])
             ->actions([
+                
                 Tables\Actions\EditAction::make()
                     ->hidden(fn () => !auth()->user()->hasAnyRole([
                         'Obispo Presidente',

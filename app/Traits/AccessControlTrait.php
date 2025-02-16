@@ -38,7 +38,7 @@ trait AccessControlTrait
         'Tesorero Sectorial',
         'Contralor Sectorial',
         'Directivo Sectorial',
-        'Usuario Estandar',
+        
     ];
 
     public static function canViewAny(): bool
@@ -50,7 +50,35 @@ trait AccessControlTrait
             self::$regionalRoles,
             self::$districtRoles,
             self::$sectorRoles,
-            ['Pastor Sectorial']
+            ['Pastor']
+        ))) {
+            return true;
+        }
+
+        return false;
+    }
+
+    public static function canView($record): bool
+    {
+        $user = Auth::user();
+        $model = get_class($record);
+
+        // 🔹 Si el usuario es un Pastor y el registro es su propio perfil
+        if ($model === \App\Models\Pastor::class && $user->hasRole('Pastor') && $user->pastor->id === $record->id) {
+            return true;
+        }
+
+        // 🔹 Si el usuario es un Pastor y el registro es la iglesia que pastorea (desde `pastorMinistry`)
+        if ($model === \App\Models\Church::class && $user->hasRole('Pastor') && $user->pastor->pastorMinistry->church_id === $record->id) {
+            return true;
+        }
+
+        // Si es un administrador, obispo o tiene roles con mayor autoridad, puede ver todos
+        if ($user->hasAnyRole(array_merge(
+            self::$nationalRoles,
+            self::$regionalRoles,
+            self::$districtRoles,
+            self::$sectorRoles
         ))) {
             return true;
         }
@@ -61,7 +89,27 @@ trait AccessControlTrait
     public static function scopeAccessControlQuery(Builder $query): Builder
     {
         $user = Auth::user();
+        $model = $query->getModel();
 
+        // 🔹 Si estamos en la tabla `pastors`, los pastores solo ven su propio registro
+        if ($model instanceof \App\Models\Pastor) {
+            if ($user->hasRole('Pastor') && $user->pastor) {
+                return $query->where('id', $user->pastor->id);
+            }
+        }
+
+        // 🔹 Si estamos en la tabla `churches`, los pastores solo ven la iglesia que pastorean
+        if ($model instanceof \App\Models\Church) {
+            $pastorMinistry = $user->pastor->pastorMinistry ?? null;
+
+            if ($user->hasRole('Pastor') && $pastorMinistry && $pastorMinistry->church_id) {
+                return $query->where('id', $pastorMinistry->church_id);
+            }
+
+            // Si no tiene una iglesia asignada, retornamos una consulta vacía
+            return $query->whereRaw('1 = 0');
+        }
+        
         // Acceso completo para roles nacionales
         if ($user->hasAnyRole(self::$nationalRoles)) {
             return $query;
@@ -86,6 +134,8 @@ trait AccessControlTrait
         return $query;
     }
 
+    
+
 
     public static function canCreate(): bool
     {
@@ -105,7 +155,19 @@ trait AccessControlTrait
     public static function canEdit($record): bool
     {
         $user = Auth::user();
+        $model = get_class($record);
 
+        // 🔹 Si el usuario es un Pastor, puede editar su propio perfil
+        if ($model === \App\Models\Pastor::class && $user->hasRole('Pastor') && $user->pastor->id === $record->id) {
+            return true;
+        }
+
+        // 🔹 Si el usuario es un Pastor, puede editar la iglesia que pastorea (desde `pastorMinistry`)
+        if ($model === \App\Models\Church::class && $user->hasRole('Pastor') && $user->pastor->pastorMinistry->church_id === $record->id) {
+            return true;
+        }
+        
+        
         if ($user->hasAnyRole(['Administrador', 'Obispo Presidente', 'Secretario Nacional', 'Tesorero Nacional']))
         {
             return true;

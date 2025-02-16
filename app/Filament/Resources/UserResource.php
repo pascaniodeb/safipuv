@@ -109,7 +109,16 @@ class UserResource extends Resource
                             ->relationship('region', 'name')
                             ->required()
                             ->reactive()
-                            ->afterStateUpdated(fn (callable $set) => $set('district_id', null)),
+                            ->afterStateUpdated(fn (callable $set) => $set('district_id', null))
+                            ->disabled(function () {
+                                // Deshabilitar el campo si el usuario no tiene los roles permitidos
+                                return !Auth::user()->hasAnyRole([
+                                    'Administrador',
+                                    'Secretario Nacional',
+                                    'Tesorero Nacional', 
+                                ]);
+                            })
+                            ->dehydrated(),
 
                         Forms\Components\Select::make('district_id')
                             ->label('Distrito')
@@ -118,14 +127,32 @@ class UserResource extends Resource
                             ->required()
                             ->reactive()
                             ->afterStateUpdated(fn (callable $set) => $set('sector_id', null))
-                            ->disabled(fn (callable $get) => !$get('region_id')),
+                            ->disabled(fn (callable $get) => !$get('region_id'))
+                            ->disabled(function () {
+                                // Deshabilitar el campo si el usuario no tiene los roles permitidos
+                                return !Auth::user()->hasAnyRole([
+                                    'Administrador',
+                                    'Secretario Nacional',
+                                    'Tesorero Nacional', 
+                                ]);
+                            })
+                            ->dehydrated(),
 
                         Forms\Components\Select::make('sector_id')
                             ->label('Sector')
                             ->options(fn (callable $get) =>
                                 \App\Models\Sector::where('district_id', $get('district_id'))->pluck('name', 'id'))
                             ->required()
-                            ->disabled(fn (callable $get) => !$get('district_id')),
+                            ->disabled(fn (callable $get) => !$get('district_id'))
+                            ->disabled(function () {
+                                // Deshabilitar el campo si el usuario no tiene los roles permitidos
+                                return !Auth::user()->hasAnyRole([
+                                    'Administrador',
+                                    'Secretario Nacional',
+                                    'Tesorero Nacional', 
+                                ]);
+                            })
+                            ->dehydrated(),
                     ])
                     ->columns(3), // Tres columnas para la sección de ubicación
 

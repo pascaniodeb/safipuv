@@ -46,8 +46,15 @@ class CarnetService
             $qrCodePath = $this->generateQrCode($pastor);
 
             // Generar el reverso del carnet
+            //$outputBackPath = storage_path("app/public/carnets/{$pastor->number_cedula}_carnet_back.png");
+            //$this->generateBack($backTemplatePath, $qrCodePath, $outputBackPath);
+
+            // Obtener el código del pastor
+            $codePastor = $pastor->pastorMinistry->code_pastor ?? 'SIN CÓDIGO';
+
+            // Generar el reverso del carnet
             $outputBackPath = storage_path("app/public/carnets/{$pastor->number_cedula}_carnet_back.png");
-            $this->generateBack($backTemplatePath, $qrCodePath, $outputBackPath);
+            $this->generateBack($backTemplatePath, $qrCodePath, $outputBackPath, $codePastor);
 
             // Generar el frente del carnet
             $outputFrontPath = storage_path("app/public/carnets/{$pastor->number_cedula}_carnet_front.png");
@@ -137,7 +144,7 @@ class CarnetService
     }
 
 
-    protected function generateBack(string $templatePath, string $qrCodePath, string $outputPath): void
+    protected function generateBack(string $templatePath, string $qrCodePath, string $outputPath, $codePastor): void
     {
         try {
             // Crear instancia de Imagick con la imagen base
@@ -147,7 +154,7 @@ class CarnetService
             $watermark = new \Imagick($qrCodePath);
 
             // Redimensionar la marca de agua a un tamaño más manejable (opcional)
-            $watermark->resizeImage(200, 200, \Imagick::FILTER_LANCZOS, 1);
+            $watermark->resizeImage(400, 400, \Imagick::FILTER_LANCZOS, 1);
 
             // Obtener dimensiones de la imagen base y de la marca de agua
             $imageWidth = $image->getImageWidth();
@@ -162,6 +169,20 @@ class CarnetService
             // Componer la marca de agua sobre la imagen base
             $image->compositeImage($watermark, \Imagick::COMPOSITE_OVER, $x, $y);
 
+            // --- Agregar el Código del Pastor debajo del QR ---
+            $draw = new \ImagickDraw();
+            $draw->setFont(public_path('fonts/arial.TTF')); // Ruta de la fuente
+            $draw->setFontSize(55);
+            $draw->setFillColor('#000000'); // Color del texto (negro)
+            $draw->setTextAlignment(\Imagick::ALIGN_CENTER);
+
+            // Definir la posición debajo del código QR
+            $textX = $imageWidth / 2; // Centrado horizontalmente
+            $textY = $y + $watermarkHeight + 80; // Posición debajo del QR
+
+            // Dibujar el código del pastor
+            $image->annotateImage($draw, $textX, $textY, 0, $codePastor);
+
             // Guardar la imagen generada
             $image->writeImage($outputPath);
 
@@ -170,7 +191,6 @@ class CarnetService
             $image->destroy();
             $watermark->clear();
             $watermark->destroy();
-
 
             \Log::info('Imagen generada exitosamente', ['outputPath' => $outputPath]);
         } catch (\Exception $e) {
@@ -188,15 +208,26 @@ class CarnetService
     }
 
 
+
     protected function generateFront(string $templatePath, Pastor $pastor, string $outputPath): void
     {
         // Crear una instancia de Imagick para la plantilla
         $image = new \Imagick($templatePath);
 
         // Cargar la foto del pastor o usar una foto por defecto
-        $photoPath = $pastor->photo_pastor && Storage::exists($pastor->photo_pastor)
-            ? Storage::path($pastor->photo_pastor)
-            : public_path('images/default-photo.png');
+        // Verificar si el pastor tiene una foto y si existe en el almacenamiento
+        $photoPath = storage_path("app/public/{$pastor->photo_pastor}");
+
+        if ($pastor->photo_pastor && file_exists($photoPath)) {
+            Log::info('Foto del pastor encontrada', ['path' => $photoPath]);
+        } else {
+            Log::warning("Foto del pastor no encontrada, usando la predeterminada.", [
+                'pastor_id' => $pastor->id,
+                'ruta_intentada' => $photoPath,
+                'existe' => file_exists($photoPath)
+            ]);
+            $photoPath = public_path('images/default-photo.png');
+        }
 
         $pastorPhoto = new \Imagick($photoPath);
         $pastorPhoto->resizeImage(442, 500, \Imagick::FILTER_LANCZOS, 1);
@@ -231,8 +262,24 @@ class CarnetService
         $image->annotateImage($draw, 482, 794, 0, $pastor->pastorMinistry->pastorLevel->name ?? 'Sin Nivel');
 
         // Agregar el cargo actual del pastor (current_position_id)
+        // Obtener el cargo actual del pastor (current_position_id)
         $currentPosition = $pastor->pastorMinistry->currentPosition->name ?? 'Sin Cargo';
-        $image->annotateImage($draw, 482, 870, 0, $currentPosition);
+
+        // Dividir el texto en líneas sin cortar palabras (máximo 25 caracteres por línea)
+        $wrappedText = wordwrap($currentPosition, 25, "\n", false);
+
+        // Separar en líneas
+        $lines = explode("\n", $wrappedText);
+
+        // Posición base para la primera línea
+        $yPosition = 870;
+        $lineSpacing = 55; // Espaciado entre líneas
+
+        foreach ($lines as $line) {
+            $image->annotateImage($draw, 482, $yPosition, 0, $line);
+            $yPosition += $lineSpacing; // Mover a la siguiente línea
+        }
+
 
         // Personalización adicional: Fecha de emisión
         //$draw->setFontSize(15);

@@ -413,7 +413,7 @@ class MinistryRelationManager extends RelationManager
                         }
                         return [];
                     })
-                    ->required()
+                    //->required()
                     ->placeholder('Selecciona una posición')
                     ->disabled(fn (callable $get) => $get('disable_current_position') ?? false) // Deshabilita si está configurado
                     ->native(false)
@@ -721,6 +721,7 @@ class MinistryRelationManager extends RelationManager
                 
             ])
             ->actions([
+                Tables\Actions\ViewAction::make(), // Esto habilita la opción de "Ver"
                 Tables\Actions\EditAction::make(),
                 //Tables\Actions\DeleteAction::make(),
                 Tables\Actions\Action::make('detach')
