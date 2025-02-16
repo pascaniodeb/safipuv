@@ -91,48 +91,74 @@ trait AccessControlTrait
         $user = Auth::user();
         $model = $query->getModel();
 
-        // 🔹 Si estamos en la tabla `pastors`, los pastores solo ven su propio registro
+        // 🔹 FILTRAR PASTORES SEGÚN EL ROL DEL USUARIO
         if ($model instanceof \App\Models\Pastor) {
+            // ✅ Los pastores solo ven su propio registro
             if ($user->hasRole('Pastor') && $user->pastor) {
                 return $query->where('id', $user->pastor->id);
             }
+
+            // ✅ Los roles nacionales ven todos los pastores
+            if ($user->hasAnyRole(self::$nationalRoles)) {
+                return $query;
+            }
+
+            // ✅ Los roles regionales solo ven pastores de su región
+            if ($user->hasAnyRole(self::$regionalRoles)) {
+                return $query->where('region_id', $user->region_id);
+            }
+
+            // ✅ Los roles distritales solo ven pastores de su distrito
+            if ($user->hasRole('Supervisor Distrital')) {
+                return $query->where('district_id', $user->district_id);
+            }
+
+            // ✅ Los roles sectoriales solo ven pastores de su sector
+            if ($user->hasAnyRole(self::$sectorRoles)) {
+                return $query->where('sector_id', $user->sector_id);
+            }
+
+            // ❌ Si el usuario no tiene permisos, no ve ningún pastor
+            return $query->whereRaw('1 = 0');
         }
 
-        // 🔹 Si estamos en la tabla `churches`, los pastores solo ven la iglesia que pastorean
+        // 🔹 FILTRAR IGLESIAS SEGÚN EL ROL DEL USUARIO
         if ($model instanceof \App\Models\Church) {
             $pastorMinistry = $user->pastor->pastorMinistry ?? null;
 
+            // ✅ Los pastores solo ven la iglesia que pastorean
             if ($user->hasRole('Pastor') && $pastorMinistry && $pastorMinistry->church_id) {
                 return $query->where('id', $pastorMinistry->church_id);
             }
 
-            // Si no tiene una iglesia asignada, retornamos una consulta vacía
+            // ✅ Los roles nacionales ven todas las iglesias
+            if ($user->hasAnyRole(self::$nationalRoles)) {
+                return $query;
+            }
+
+            // ✅ Los roles regionales solo ven iglesias de su región
+            if ($user->hasAnyRole(self::$regionalRoles)) {
+                return $query->where('region_id', $user->region_id);
+            }
+
+            // ✅ Los roles distritales solo ven iglesias de su distrito
+            if ($user->hasRole('Supervisor Distrital')) {
+                return $query->where('district_id', $user->district_id);
+            }
+
+            // ✅ Los roles sectoriales solo ven iglesias de su sector
+            if ($user->hasAnyRole(self::$sectorRoles)) {
+                return $query->where('sector_id', $user->sector_id);
+            }
+
+            // ❌ Si el usuario no tiene permisos, no ve ninguna iglesia
             return $query->whereRaw('1 = 0');
         }
-        
-        // Acceso completo para roles nacionales
-        if ($user->hasAnyRole(self::$nationalRoles)) {
-            return $query;
-        }
 
-        // Filtrar registros por región para roles regionales
-        if ($user->hasRole(self::$regionalRoles)) {
-            return $query->where('region_id', $user->region_id);
-        }
-
-        // Filtrar registros por distrito
-        if ($user->hasRole('Supervisor Distrital')) {
-            return $query->where('district_id', $user->district_id);
-        }
-
-        // Filtrar registros por sector
-        if ($user->hasAnyRole(self::$sectorRoles)) {
-            return $query->where('sector_id', $user->sector_id);
-        }
-
-        // Acceso restringido por defecto
+        // ❌ Si no es ni pastores ni iglesias, retornamos una consulta vacía
         return $query;
     }
+
 
     
 
@@ -143,7 +169,7 @@ trait AccessControlTrait
 
         if ($user->hasAnyRole(array_merge(
             ['Administrador', 'Secretario Nacional', 'Tesorero Nacional'],
-            ['Secretario Regional', 'Tesorero Regional', 'Usuario Estandar'],
+            ['Secretario Regional', 'Usuario Estandar'],
             ['Presbítero Sectorial', 'Secretario Sectorial', 'Tesorero Sectorial']
         ))) {
             return true;
