@@ -59,23 +59,24 @@ class TreasuryAllocationResource extends Resource
         $user = auth()->user();
 
         return match (true) {
-            // TESORERO SECTORIAL: Solo ve registros de su sector
-            $user->hasRole(['Tesorero Sectorial', 'Contralor Sectorial']) => $query
-                ->selectRaw("
-                    MIN(id) AS id,
-                    treasury_id,
-                    offering_category_id,
-                    month,
-                    SUM(amount) AS amount,
-                    ROUND(AVG(percentage), 2) AS percentage
-                ")
-                ->whereHas('offeringReport.pastor', function ($q) use ($user) {
-                    $q->where('sector_id', $user->sector_id);
-                })
-                ->whereHas('treasury', function ($q) {
-                    $q->where('name', 'sectorial');
-                })
-                ->groupBy('treasury_id', 'offering_category_id', 'month'),
+            // TESORERO SECTORIAL: Ve registros de su sector y lo que se envía al distrito, regional y nacional
+            $user->hasRole(['Presbítero Sectorial','Tesorero Sectorial', 'Contralor Sectorial']) => $query
+            ->selectRaw("
+                MIN(id) AS id,
+                treasury_id,
+                offering_category_id,
+                month,
+                SUM(amount) AS amount,
+                ROUND(AVG(percentage), 2) AS percentage
+            ")
+            ->whereHas('offeringReport.pastor', function ($q) use ($user) {
+                $q->where('sector_id', $user->sector_id);
+            })
+            ->whereHas('treasury', function ($q) {
+                $q->whereIn('name', ['sectorial', 'distrital', 'regional', 'nacional']);
+            }) // 🔹 Filtra no solo el sectorial, sino también distrital, regional y nacional
+            ->groupBy('treasury_id', 'offering_category_id', 'month'),
+
 
             // SUPERVISOR DISTRITAL: Solo ve registros de su distrito
             $user->hasRole('Supervisor Distrital') => $query
@@ -96,7 +97,7 @@ class TreasuryAllocationResource extends Resource
                 ->groupBy('treasury_id', 'offering_category_id', 'month'),
 
             // TESORERO REGIONAL: Solo ve registros de su región
-            $user->hasRole(['Tesorero Regional', 'Contralor Regional']) => $query
+            $user->hasRole(['Superintendente Regional', 'Tesorero Regional', 'Contralor Regional']) => $query
                 ->selectRaw("
                     MIN(id) AS id,
                     treasury_id,
@@ -129,6 +130,10 @@ class TreasuryAllocationResource extends Resource
             default => $query->whereNull('id'),
         };
     }
+
+
+
+
 
     
     public static function form(Form $form): Form
@@ -222,43 +227,47 @@ class TreasuryAllocationResource extends Resource
             ->filters([
                 // 🔹 Filtro por Mes (month)
                 Tables\Filters\SelectFilter::make('month')
-                    ->label('Mes')
-                    ->options(
-                        TreasuryAllocation::select('month')
-                            ->distinct()
-                            ->orderBy('month', 'desc')
-                            ->pluck('month', 'month')
-                            ->toArray()
-                    )
-                    ->searchable(),
-            
+                ->label('Mes')
+                ->options(
+                    TreasuryAllocation::select('month')
+                        ->distinct()
+                        ->orderBy('month', 'desc')
+                        ->pluck('month', 'month')
+                        ->toArray()
+                )
+                ->searchable(),
+
                 // 🔹 Filtro por Tesorería (treasury_id)
                 Tables\Filters\SelectFilter::make('treasury_id')
-                    ->label('Tesorería')
-                    ->relationship('treasury', 'name')
-                    ->searchable(),
-            
+                ->label('Tesorería')
+                ->relationship('treasury', 'name')
+                ->searchable(),
+
                 // 🔹 Filtro por Categoría de Ofrenda (offering_category_id)
                 Tables\Filters\SelectFilter::make('offering_category_id')
-                    ->label('Categoría de Ofrenda')
-                    ->relationship('offeringCategory', 'name')
-                    ->searchable(),
-            
+                ->label('Categoría de Ofrenda')
+                ->relationship('offeringCategory', 'name')
+                ->searchable(),
+
                 // 🔹 Filtro por Rango de Monto (amount)
                 Tables\Filters\Filter::make('amount_range')
-                    ->form([
-                        Forms\Components\TextInput::make('min_amount')
-                            ->label('Monto mínimo')
-                            ->numeric(),
-                        Forms\Components\TextInput::make('max_amount')
-                            ->label('Monto máximo')
-                            ->numeric(),
-                    ])
-                    ->query(function ($query, array $data) {
-                        return $query
-                            ->when($data['min_amount'] ?? null, fn ($q, $min) => $q->where('amount', '>=', $min))
-                            ->when($data['max_amount'] ?? null, fn ($q, $max) => $q->where('amount', '<=', $max));
-                    }),
+                ->form([
+                    Forms\Components\TextInput::make('min_amount')
+                        ->label('Monto mínimo')
+                        ->numeric(),
+                    Forms\Components\TextInput::make('max_amount')
+                        ->label('Monto máximo')
+                        ->numeric(),
+                ])
+                ->query(function (Builder $query, array $data) {
+                    return $query
+                        ->when(isset($data['min_amount']), fn ($q) => $q->where('amount', '>=', $data['min_amount']))
+                        ->when(isset($data['max_amount']), fn ($q) => $q->where('amount', '<=', $data['max_amount']));
+                }),
+
+                
+
+
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),

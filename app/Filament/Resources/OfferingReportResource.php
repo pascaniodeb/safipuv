@@ -9,6 +9,7 @@ use App\Models\OfferingReport;
 use App\Models\OfferingItem;
 use Illuminate\Support\Facades\Auth;
 use Filament\Notifications\Notification;
+use Filament\Tables\Actions\EditAction;
 use App\Models\Pastor;
 use App\Models\Church;
 use App\Models\Treasury;
@@ -31,6 +32,8 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Grid;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Columns\TextColumn;
 use App\Traits\OfferingReportFilterTrait;
 use Filament\Forms\Get;
@@ -68,18 +71,15 @@ class OfferingReportResource extends Resource
         return 'Modulos';
     }
 
-    public static function getEloquentQuery(): Builder
-    {
-        return static::getFilteredQuery(); // 📌 Aplica el filtrado basado en roles
-    }
+    //public static function getEloquentQuery(): Builder
+    //{
+        //return static::getFilteredQuery(); // 📌 Aplica el filtrado optimizado
+    //}
 
     public static function canCreate(): bool
     {
-        $user = auth()->user();
-        return $user->hasRole('Tesorero Sectorial'); // 📌 Solo este rol puede crear registros
+        return auth()->user()->hasRole('Tesorero Sectorial'); // 📌 Solo este rol puede crear registros
     }
-
-    
 
     public static function canView($record): bool
     {
@@ -115,10 +115,31 @@ class OfferingReportResource extends Resource
                         // Totales Globales
                         Forms\Components\Section::make('Totales Globales')
                             ->schema([
+                                // 📌 Estado de la Orden
+                                // 📌 Estado de la Orden
+                                Forms\Components\ToggleButtons::make('status')
+                                    ->inline()
+                                    ->options([
+                                        'pendiente' => 'Pendiente',
+                                        'aprobado' => 'Aprobado',
+                                    ])
+                                    ->colors([
+                                        'pendiente' => 'warning', // Amarillo para "Pendiente"
+                                        'aprobado' => 'success',  // Verde para "Aprobado"
+                                    ])
+                                    ->required()
+                                    ->dehydrated() // ✅ Asegura que el valor se envía aunque el campo esté deshabilitado
+                                    ->disabled(function () {
+                                        return !Auth::user()->hasAnyRole([
+                                            'Tesorero Sectorial', 
+                                        ]);
+                                    }),
+
+                                    
                                 Forms\Components\Grid::make(3)
                                     ->schema([
                                         Forms\Components\TextInput::make('total_bs')
-                                            ->label('Total en Bs')
+                                            ->label('Total de Bolívares')
                                             ->numeric()
                                             ->reactive()
                                             ->live()
@@ -127,7 +148,7 @@ class OfferingReportResource extends Resource
                                             ->dehydrated(),
 
                                         Forms\Components\TextInput::make('total_usd')
-                                            ->label('Total en Usd')
+                                            ->label('Total de Dólares')
                                             ->numeric()
                                             ->reactive()
                                             ->live()
@@ -136,7 +157,7 @@ class OfferingReportResource extends Resource
                                             ->dehydrated(),
                                         
                                         Forms\Components\TextInput::make('total_cop')
-                                            ->label('Total en Usd')
+                                            ->label('Total de Pesos')
                                             ->numeric()
                                             ->reactive()
                                             ->live()
@@ -215,6 +236,18 @@ class OfferingReportResource extends Resource
                 TextColumn::make('pastor.number_cedula')
                     ->label('Cédula del Pastor')
                     ->searchable(),
+                
+                    
+                TextColumn::make('status')
+                    ->badge()
+                    ->label('Estado')
+                    ->sortable()
+                    ->colors([
+                        'warning' => 'pendiente', // Amarillo para "pendiente"
+                        'success' => 'aprobado',  // Verde para "aprobado"
+                    ]),
+                    
+                                  
 
                 // Iglesia asociada
                 TextColumn::make('church.name')
@@ -248,12 +281,12 @@ class OfferingReportResource extends Resource
                     ->sortable(),
 
                 TextColumn::make('total_usd')
-                    ->label('Total Bs')
+                    ->label('Total USD')
                     ->money('USD') // Formatear como moneda
                     ->sortable(),
 
                 TextColumn::make('total_cop')
-                    ->label('Total Bs')
+                    ->label('Total COP')
                     ->money('COP') // Formatear como moneda
                     ->sortable(),
 
@@ -289,10 +322,108 @@ class OfferingReportResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                //
+                // Filtro por mes
+                SelectFilter::make('month')
+                    ->label('Filtrar por Mes')
+                    ->options(
+                        OfferingReport::select('month')
+                            ->distinct()
+                            ->orderByDesc('month')
+                            ->pluck('month', 'month')
+                    )
+                    ->searchable(),
+            
+                // Filtro por estado (pendiente/aprobado)
+                SelectFilter::make('status')
+                    ->label('Estado')
+                    ->options([
+                        'pendiente' => 'Pendiente',
+                        'aprobado' => 'Aprobado',
+                    ])
+                    ->searchable(),
+            
+                // Filtro por pastor
+                SelectFilter::make('pastor_id')
+                    ->label('Pastor')
+                    ->relationship('pastor', 'name')
+                    ->searchable(),
+            
+                // Filtro por iglesia
+                SelectFilter::make('church_id')
+                    ->label('Iglesia')
+                    ->relationship('church', 'name')
+                    ->searchable(),
+            
+                // Filtro por región
+                SelectFilter::make('region_id')
+                    ->label('Región')
+                    ->relationship('region', 'name')
+                    ->searchable(),
+            
+                // Filtro por distrito
+                SelectFilter::make('district_id')
+                    ->label('Distrito')
+                    ->relationship('district', 'name')
+                    ->searchable(),
+            
+                // Filtro por sector
+                SelectFilter::make('sector_id')
+                    ->label('Sector')
+                    ->relationship('sector', 'name')
+                    ->searchable(),
+            
+                // Filtro por total en Bs
+                Filter::make('total_bs')
+                    ->form([
+                        TextInput::make('total_bs_min')
+                            ->numeric()
+                            ->label('Mínimo'),
+                        TextInput::make('total_bs_max')
+                            ->numeric()
+                            ->label('Máximo'),
+                    ])
+                    ->query(function (Builder $query, array $data) {
+                        return $query
+                            ->when($data['total_bs_min'], fn ($q) => $q->where('total_bs', '>=', $data['total_bs_min']))
+                            ->when($data['total_bs_max'], fn ($q) => $q->where('total_bs', '<=', $data['total_bs_max']));
+                    }),
+            
+                // Filtro por total en USD
+                Filter::make('total_usd')
+                    ->form([
+                        TextInput::make('total_usd_min')
+                            ->numeric()
+                            ->label('Mínimo'),
+                        TextInput::make('total_usd_max')
+                            ->numeric()
+                            ->label('Máximo'),
+                    ])
+                    ->query(function (Builder $query, array $data) {
+                        return $query
+                            ->when($data['total_usd_min'], fn ($q) => $q->where('total_usd', '>=', $data['total_usd_min']))
+                            ->when($data['total_usd_max'], fn ($q) => $q->where('total_usd', '<=', $data['total_usd_max']));
+                    }),
+            
+                // Filtro por total en COP
+                Filter::make('total_cop')
+                    ->form([
+                        TextInput::make('total_cop_min')
+                            ->numeric()
+                            ->label('Mínimo'),
+                        TextInput::make('total_cop_max')
+                            ->numeric()
+                            ->label('Máximo'),
+                    ])
+                    ->query(function (Builder $query, array $data) {
+                        return $query
+                            ->when($data['total_cop_min'], fn ($q) => $q->where('total_cop', '>=', $data['total_cop_min']))
+                            ->when($data['total_cop_max'], fn ($q) => $q->where('total_cop', '<=', $data['total_cop_max']));
+                    }),
             ])
+            
             ->actions([
                 Tables\Actions\EditAction::make(),
+                    
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
@@ -368,26 +499,6 @@ class OfferingReportResource extends Resource
                         ->disabled()
                         ->required(),
 
-
-                    // 📌 Estado de la Orden
-                    Forms\Components\ToggleButtons::make('status')
-                        ->inline()
-                        ->options([
-                            'pendiente' => 'Pendiente',
-                            'aprobado' => 'Aprobado',
-                        ])
-                        ->required()
-                        ->disabled(function () {
-                            // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                            return !Auth::user()->hasAnyRole([
-                                'Tesorero Sectorial', 
-                            ]);
-                        }),
-                    
-                    
-
-                    
-                    
                     // Campo Select para elegir el pastor
                     Forms\Components\Select::make('pastor_id')
                         ->label('Seleccione un Pastor')
@@ -730,8 +841,11 @@ class OfferingReportResource extends Resource
                             ->label('Monto en Bs')
                             ->numeric()
                             ->default(0.00)
-                            ->live()
+                            ->live(debounce: 500) // 🔹 Evita que borre el número al escribir rápido
                             ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                                $formattedState = (float) str_replace(',', '.', $state); // 🔹 Convierte ',' en '.' y fuerza a float
+                                $set('amount_bs', number_format($formattedState, 2, '.', '')); // 🔹 Formato correcto con 2 decimales
+                                
                                 self::calculateSubtotal($set, $get);
                                 self::calculateGlobalTotals($set, $get);
                             })
@@ -746,8 +860,11 @@ class OfferingReportResource extends Resource
                             ->label('Monto en USD')
                             ->numeric()
                             ->default(0.00)
-                            ->live()
+                            ->live(debounce: 500) // 🔹 Evita que el número se borre mientras el usuario escribe
                             ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                                $formattedState = (float) str_replace(',', '.', $state); // 🔹 Convierte ',' en '.' y fuerza a float
+                                $set('amount_usd', number_format($formattedState, 2, '.', '')); // 🔹 Formatea con 2 decimales
+            
                                 self::calculateSubtotal($set, $get);
                                 self::calculateGlobalTotals($set, $get);
                             })
@@ -762,8 +879,11 @@ class OfferingReportResource extends Resource
                             ->label('Monto en COP')
                             ->numeric()
                             ->default(0.00)
-                            ->live()
+                            ->live(debounce: 500) // 🔹 Evita que el número se borre mientras el usuario escribe
                             ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                                $formattedState = (float) str_replace(',', '.', $state); // 🔹 Convierte ',' en '.' y fuerza a float
+                                $set('amount_cop', number_format($formattedState, 2, '.', '')); // 🔹 Formatea con 2 decimales
+                                
                                 self::calculateSubtotal($set, $get);
                                 self::calculateGlobalTotals($set, $get);
                             })

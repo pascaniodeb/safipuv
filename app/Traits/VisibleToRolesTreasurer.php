@@ -18,14 +18,17 @@ trait VisibleToRolesTreasurer
         // Definir los roles que pueden ver este recurso
         $allowedRoles = [
             'Administrador',
-            'Tesorero Sectorial',
-            'Contralor Sectorial',
-            'Supervisor Distrital',
-            'Tesorero Regional',
-            'Contralor Regional',
+            'Obispo Presidente',
+            'Obispo Viceresidente',
             'Tesorero Nacional',
             'Contralor Nacional',
-            'Obispo Presidente',
+            'Superintendente Regional',
+            'Tesorero Regional',
+            'Contralor Regional',
+            'Supervisor Distrital',
+            'Presbítero Sectorial',
+            'Tesorero Sectorial',
+            'Contralor Sectorial',
         ];
 
         // Verificar si el usuario tiene alguno de los roles permitidos

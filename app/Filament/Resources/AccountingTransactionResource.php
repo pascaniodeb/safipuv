@@ -100,15 +100,40 @@ class AccountingTransactionResource extends Resource
                             
                             Forms\Components\Select::make('accounting_id')
                                 ->label('Contabilidad')
-                                ->options(fn () => \App\Models\Accounting::whereHas('treasury', function ($query) {
-                                    $query->where('level', auth()->user()->treasury_level);
-                                })->pluck('name', 'id'))
-                                ->default(fn () => \App\Models\Accounting::whereHas('treasury', function ($query) {
-                                    $query->where('level', auth()->user()->treasury_level);
-                                })->value('id'))
+                                ->options(function () {
+                                    $user = auth()->user(); // Obtener usuario autenticado
+                            
+                                    // 🔹 Si el usuario es "Supervisor Distrital", le mostramos la Contabilidad Distrital
+                                    if ($user->hasRole('Supervisor Distrital')) {
+                                        return \App\Models\Accounting::whereHas('treasury', function ($query) {
+                                            $query->where('level', 'Distrital'); // Solo nivel Distrital
+                                        })->pluck('name', 'id');
+                                    }
+                            
+                                    // 🔹 Para los Tesoreros (Sectorial, Distrital, Regional, Nacional), usar `treasury_level`
+                                    return \App\Models\Accounting::whereHas('treasury', function ($query) use ($user) {
+                                        $query->where('level', $user->treasury_level); // Se mantiene la lógica actual
+                                    })->pluck('name', 'id');
+                                })
+                                ->default(function () {
+                                    $user = auth()->user();
+                            
+                                    // 🔹 Si el usuario es Supervisor Distrital, asignamos automáticamente la Contabilidad Distrital
+                                    if ($user->hasRole('Supervisor Distrital')) {
+                                        return \App\Models\Accounting::whereHas('treasury', function ($query) {
+                                            $query->where('level', 'Distrital');
+                                        })->value('id');
+                                    }
+                            
+                                    // 🔹 Para los Tesoreros, usamos el `treasury_level` como en la lógica original
+                                    return \App\Models\Accounting::whereHas('treasury', function ($query) use ($user) {
+                                        $query->where('level', $user->treasury_level);
+                                    })->value('id');
+                                })
                                 ->disabled()
                                 ->dehydrated()
                                 ->required(),
+                            
                             
                             
                             Forms\Components\Hidden::make('user_id')
@@ -119,27 +144,43 @@ class AccountingTransactionResource extends Resource
                             Forms\Components\Select::make('movement_id')
                                 ->label('Tipo de Movimiento')
                                 ->relationship('movement', 'type')
+                                ->native(false)
                                 ->required()
                                 ->reactive(),
 
                             Forms\Components\Select::make('accounting_code_id')
                                 ->label('Código Contable')
-                                ->relationship('accountingCode', 'code')
-                                ->required()
                                 ->options(function (callable $get) {
                                     $movementId = $get('movement_id');
+                                    $user = auth()->user(); // Obtener usuario autenticado
+                                    $userLevel = $user->treasury_level; // 🔹 Nivel de contabilidad para Tesoreros
+                            
                                     return $movementId
                                         ? \App\Models\AccountingCode::where('movement_id', $movementId)
+                                            ->whereHas('accounting', function ($query) use ($user, $userLevel) {
+                                                $query->whereHas('treasury', function ($q) use ($user, $userLevel) {
+                                                    if ($user->hasRole('Supervisor Distrital')) {
+                                                        $q->where('level', 'Distrital'); // 🔹 Excepción para el Supervisor Distrital
+                                                    } else {
+                                                        $q->where('level', $userLevel); // 🔹 Mantiene la lógica actual para Tesoreros
+                                                    }
+                                                });
+                                            })
                                             ->pluck('code', 'id')
                                         : [];
                                 })
-                                //->searchable()
-                                ->disabled(fn (callable $get) => !$get('movement_id'))
+                                ->required()
+                                ->native(false)
                                 ->reactive()
+                                ->disabled(fn (callable $get) => !$get('movement_id'))
                                 ->afterStateUpdated(function ($state, callable $set) {
                                     $description = \App\Models\AccountingCode::where('id', $state)->value('description');
                                     $set('accounting_code_description', $description);
                                 }),
+                            
+                            
+                            
+                            
 
                             // ✅ CAMPO QUE MUESTRA LA DESCRIPCIÓN DEL CÓDIGO CONTABLE
                             Forms\Components\TextInput::make('accounting_code_description')

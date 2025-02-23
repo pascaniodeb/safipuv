@@ -6,13 +6,18 @@ use SimpleSoftwareIO\QrCode\Facades\QrCode;
 use Illuminate\Support\Facades\Storage;
 use Intervention\Image\Facades\Image;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Builder;
+use App\Services\AccessControlService;
+use App\Traits\PastorAccessTrait;
 use Illuminate\Database\Eloquent\Model;
+use App\Notifications\PastorNotification;
+use Filament\Notifications\Notification;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
 
 class Pastor extends Model
 {
-    use HasFactory, LogsActivity;
+    use HasFactory, LogsActivity, PastorAccessTrait;
 
     /**
      * Los atributos que se pueden asignar en masa.
@@ -62,16 +67,26 @@ class Pastor extends Model
         'other_work' => 'boolean',
     ];
 
+    protected static function booted()
+    {
+        // 🔹 Aplica el Global Scope de Control de Acceso
+        static::addGlobalScope('accessControl', function (Builder $query) {
+            AccessControlService::applyFilters($query);
+        });
+
+    }
+
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logAll() // 🔹 Registra todos los cambios en el modelo
-            ->logOnlyDirty() // 🔹 Solo registra los cambios realizados, no repite valores iguales
-            ->useLogName('Pastores') // 🔹 Nombre del log en la base de datos
-            ->dontSubmitEmptyLogs(); // 🔹 Evita guardar logs vacíos
+            ->logAll()
+            ->logOnlyDirty()
+            ->useLogName('Pastores')
+            ->dontSubmitEmptyLogs();
     }
 
-
+    
+    
     /**
      * Relaciones con otras tablas.
      */
@@ -161,6 +176,8 @@ class Pastor extends Model
         return $this->hasOne(\App\Models\PastorMinistry::class, 'pastor_id');
     }
 
+    
+
     public function church()
     {
         return $this->belongsTo(Church::class);
@@ -179,8 +196,14 @@ class Pastor extends Model
 
     public function user()
     {
-        return $this->belongsTo(User::class, 'user_id'); // Asegúrate de que la clave foránea sea correcta
+        return $this->belongsTo(User::class, 'number_cedula', 'username');
     }
+
+    public function pastor()
+    {
+        return $this->belongsTo(Pastor::class);
+    }
+
 
     // En el modelo Pastor
     public static function forUser($user)

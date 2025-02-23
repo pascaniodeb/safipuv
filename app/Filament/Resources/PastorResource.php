@@ -29,27 +29,6 @@ class PastorResource extends Resource
 
     protected static ?int $navigationSort = 2; // Orden
 
-    
-
-    //public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
-    //{
-        //$query = parent::getEloquentQuery();
-        //$user = auth()->user();
-
-        // Si no existe el registro, devuelve un conjunto vacío
-        //if ($user->hasRole('Pastor') && !\App\Models\Pastor::where('email', $user->email)->exists()) {
-            //return $query->where('id', -1); // Esto devolverá un conjunto vacío
-        //}
-
-        //return $query;
-    //}
-
-
-    public static function getEloquentQuery(): Builder
-    {
-        // Aplica la lógica de control de acceso al recurso
-        return static::scopeAccessControlQuery(parent::getEloquentQuery());
-    }
 
     public static function getPluralModelLabel(): string
     {
@@ -81,9 +60,37 @@ class PastorResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-m-user-group';
 
-    
-    
-    
+    public static function getSearchable(): array
+    {
+        return [
+            'name',
+            'lastname',
+            'number_cedula',
+            'email',
+        ];
+    }
+
+    public static function canCreate(): bool
+    {
+        $user = auth()->user();
+
+        return $user && $user->hasAnyRole([
+            'Secretario Nacional',
+            'Secretario Regional',
+            'Secretario Sectorial',
+        ]);
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery(); // 🔹 Usa la consulta base correctamente
+    }
+
+    public static function canViewNotifications(): bool
+    {
+        return true; // 🔹 Habilita la visualización de notificaciones
+    }
+
 
     public static function form(Form $form): Form
     {
@@ -438,6 +445,12 @@ class PastorResource extends Resource
 
                 Tables\Columns\TextColumn::make('lastname')
                     ->label('Apellido')
+                    ->searchable()
+                    ->sortable(),
+
+                // ID Personal
+                Tables\Columns\TextColumn::make('number_cedula')
+                    ->label('Cédula')
                     ->searchable()
                     ->sortable(),
                 

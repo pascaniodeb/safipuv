@@ -4,12 +4,15 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
+use App\Services\AccessControlService;
+use App\Traits\PastorAccessTrait;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
 
 class Church extends Model
 {
-    use HasFactory, LogsActivity;
+    use HasFactory, LogsActivity, PastorAccessTrait;
 
     /**
      * La tabla asociada con el modelo.
@@ -103,7 +106,14 @@ class Church extends Model
         'name_professionals' => 'array',
     ];
 
-
+    protected static function booted()
+    {
+        static::addGlobalScope('accessControl', function (Builder $query) {
+            AccessControlService::applyFilters($query);
+        });
+    }
+    
+    
     /**
      * Relaciones
      */
@@ -153,6 +163,11 @@ class Church extends Model
     public function ministries()
     {
         return $this->hasMany(PastorMinistry::class);
+    }
+
+    public function pastorMinistries()
+    {
+        return $this->hasMany(PastorMinistry::class, 'church_id', 'id');
     }
 
     public function titularPastor()

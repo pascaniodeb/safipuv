@@ -8,6 +8,7 @@ use Spatie\Permission\Traits\HasRoles;
 use Filament\Models\Contracts\HasAvatar;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Database\Eloquent\Relations\HasOne; // ✅ Importar correctamente
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\Traits\LogsActivity;
@@ -76,8 +77,9 @@ class User extends Authenticatable implements HasAvatar
 
     public function pastor()
     {
-        return $this->hasOne(Pastor::class, 'number_cedula', 'username');
+        return $this->belongsTo(Pastor::class, 'number_cedula', 'username');
     }
+
 
     public function treasury()
     {
@@ -129,5 +131,36 @@ class User extends Authenticatable implements HasAvatar
             return asset('storage/' . $this->profile_photo);
         }
         return 'https://ui-avatars.com/api/?name=' . urlencode($this->name);
+    }
+    
+    public function canAccessFilament(): bool
+    {
+        // Lista de roles permitidos
+        $allowedRoles = [
+            //'Administrador',
+            'Obispo Presidente',
+            'Obispo Vicepresidente',
+            'Secretario Nacional',
+            'Tesorero Nacional',
+            'Contralor Nacional',
+            'Inspector Nacional',
+            'Directivo Nacional',
+            'Superintendente Regional',
+            'Secretario Regional',
+            'Tesorero Regional',
+            'Contralor Regional',
+            'Inspector Regional',
+            'Directivo Regional',
+            'Supervisor Distrital',
+            'Presbítero Sectorial',
+            'Secretario Sectorial',
+            'Tesorero Sectorial',
+            'Contralor Sectorial',
+            'Directivo Sectorial',
+            'Pastor'
+        ];
+
+        // Verificar si el usuario tiene alguno de los roles permitidos
+        return $this->hasAnyRole($allowedRoles);
     }
 }

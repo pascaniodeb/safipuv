@@ -89,27 +89,20 @@ class BankAccountResource extends Resource
                             ->relationship('accountType', 'name')
                             ->required()
                             ->reactive()
-                            ->default(fn () => \App\Models\BankAccountType::first()?->id)
-                            ->afterStateUpdated(fn ($state, callable $set) => self::handleAccountTypeSelection($state, $set)),
+                            ->default(fn () => \App\Models\BankAccountType::first()?->id),
+                            //->afterStateUpdated(fn ($state, callable $set) => self::handleAccountTypeSelection($state, $set)),
 
-                        // Usuario (Solo para Personal)
                         Forms\Components\Select::make('user_id')
                             ->label('Cédula')
-                            ->disabled() // Deshabilitado visualmente
                             ->relationship('user', 'username')
-                            ->required()
-                            ->default(fn () => auth()->user()->id) // Usuario autenticado en creación
-                            ->afterStateHydrated(function (callable $set, $record) {
-                                if ($record && $record->user) {
-                                    $set('user_id', $record->user->id); // Configura el usuario relacionado
-                                } else {
-                                    // Si no hay un registro, usa el usuario autenticado
-                                    $set('user_id', auth()->user()->id);
-                                }
-                            }),
-                            Forms\Components\Hidden::make('hidden_user_id')
-                                ->default(fn ($get) => $get('user_id')) // Toma el valor del campo deshabilitado
-                                ->required(), // Asegura que siempre esté presente
+                            ->disabled() // 🔹 Siempre deshabilitado (no editable)
+                            ->dehydrated()
+                            ->default(fn () => auth()->user()->id), // 🔹 Siempre toma el usuario autenticado
+                            
+                        
+                        
+                        
+
 
                         // Email (Solo para Personal)
                         Forms\Components\TextInput::make('email')
@@ -132,7 +125,7 @@ class BankAccountResource extends Resource
                         Forms\Components\TextInput::make('tax_id')
                             ->label('RIF')
                             ->required()
-                            ->placeholder('Ejemplo: J-12345678-9')
+                            ->placeholder('Ejemplo: J123456789')
                             ->visible(fn ($get) => $get('bank_account_type_id') == 2),
 
                         // Razón Social (Solo para Jurídica)
@@ -271,11 +264,15 @@ class BankAccountResource extends Resource
                     ->label('Cuenta')
                     ->sortable()
                     ->searchable(),
-            
-                // Usuario
+
+                // Usuario (Cédula) - Solo si es Cuenta Personal
                 Tables\Columns\TextColumn::make('user.username')
                     ->label('Cédula')
-                    ->searchable(),
+                    ->searchable()
+                    ->formatStateUsing(fn ($record) => $record->bank_account_type_id == 1 ? $record->user->username : null) // 🔹 Oculta si no es Cuenta Personal
+                    ->sortable(),
+                    //->toggleable(isToggledHiddenByDefault: true), // 🔹 Permite que el usuario muestre/oculte manualmente
+
             
                 // Número de Cuenta
                 Tables\Columns\TextColumn::make('account_number')

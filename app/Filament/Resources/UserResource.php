@@ -64,15 +64,6 @@ class UserResource extends Resource
         return 0;
     }
 
-
-    public static function getNavigationBadge(): ?string
-    {
-        /** @var class-string<Model> $modelClass */
-        $modelClass = static::$model;
-
-        return (string) $modelClass::count(); // Personaliza según sea necesario
-    }
-
     public static function getSearchable(): array
     {
         return [

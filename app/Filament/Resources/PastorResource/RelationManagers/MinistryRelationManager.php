@@ -7,6 +7,8 @@ use Filament\Forms\Form;
 use App\Models\Pastor;
 use App\Models\Church;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Resources\RelationManagers\Concerns\InteractsWithTable;
+use Filament\Resources\RelationManagers\Concerns\InteractsWithForms;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use App\Traits\RelationManagerAccess;
@@ -33,7 +35,6 @@ class MinistryRelationManager extends RelationManager
     protected function getTableQuery(): Builder
     {
         $pastor = $this->getOwnerRecord();
-
         if (!$pastor) {
             throw new \Exception('El registro del pastor no está definido.');
         }
@@ -42,10 +43,7 @@ class MinistryRelationManager extends RelationManager
         $relatedModel = $pastor->pastorMinistries()->getRelated();
 
         // Construir la consulta manualmente
-        $query = $relatedModel->newQuery();
-        $this->registroExiste = $query->where('pastor_id', $pastor->id)->exists();
-
-        return $query;
+        return $relatedModel->newQuery()->where('pastor_id', $pastor->id);
     }
 
     public static function getEloquentQuery(): Builder
@@ -80,7 +78,7 @@ class MinistryRelationManager extends RelationManager
     
     
 
-    public function form(Forms\Form $form): Forms\Form
+    public function form(Form $form): Form
     {
         return $form
             ->schema([
@@ -716,37 +714,25 @@ class MinistryRelationManager extends RelationManager
                 Tables\Actions\CreateAction::make()
                     ->label('Agregar Información')
                     ->modalHeading('Nueva Información Ministerial')
-                    ->hidden(fn () => $this->getTableQuery()->exists()),
-                
-                
+                    ->hidden(fn () => $this->getTableQuery()->exists()), // Oculta si ya existe un registro
             ])
             ->actions([
-                Tables\Actions\ViewAction::make(), // Esto habilita la opción de "Ver"
-                Tables\Actions\EditAction::make(),
-                //Tables\Actions\DeleteAction::make(),
+                Tables\Actions\ViewAction::make(), // Habilita la opción de "Ver"
+                Tables\Actions\EditAction::make(), // Habilita la opción de "Editar"
                 Tables\Actions\Action::make('detach')
                     ->label('Desvincular Iglesia')
                     ->requiresConfirmation() // Solicitar confirmación antes de ejecutar la acción
+                    ->modalHeading('Desvincular Pastor')
+                    ->modalDescription('¿Estás seguro de que deseas desvincular esta iglesia del pastor?')
+                    ->modalSubmitActionLabel('Sí, desvincular')
                     ->action(function ($record) {
                         if (!$record) {
                             throw new \Exception('El registro no existe.');
                         }
-
+            
                         // Actualizar el campo church_id a null en la tabla pastor_ministries
                         $record->update(['church_id' => null]);
-
-                        // Limpiar los campos relacionados con la iglesia en el formulario
-                        $this->form->fill([
-                            'church_id' => null,
-                            'code_church' => null,
-                            'region_id' => null,
-                            'district_id' => null,
-                            'sector_id' => null,
-                            'state_id' => null,
-                            'city_id' => null,
-                            'address' => null,
-                        ]);
-
+            
                         // Mostrar una notificación de éxito
                         Notification::make()
                             ->title('Éxito')
@@ -754,16 +740,20 @@ class MinistryRelationManager extends RelationManager
                             ->success()
                             ->send();
                     })
-                    ->disabled(function () {
-                        // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                        return !Auth::user()->hasAnyRole([
-                            'Administrador',
-                            'Secretario Nacional',
-                            'Tesorero Nacional',
-                            'Secretario Regional',
-                            'Secretario Sectorial', 
-                        ]);
-                    })
+                    ->disabled(fn () => !Auth::user()->hasAnyRole([
+                        'Administrador',
+                        'Secretario Nacional',
+                        'Tesorero Nacional',
+                        'Secretario Regional',
+                        'Secretario Sectorial',
+                    ])) // Deshabilitar si el usuario no tiene los roles permitidos
+                    ->tooltip(fn () => Auth::user()->hasAnyRole([
+                        'Administrador',
+                        'Secretario Nacional',
+                        'Tesorero Nacional',
+                        'Secretario Regional',
+                        'Secretario Sectorial',
+                    ]) ? null : 'No tienes permiso para realizar esta acción'), // Tooltip informativo
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([

@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Builder;
+use App\Services\OfferingReportFilterService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Log;
 use Spatie\Activitylog\Traits\LogsActivity;
@@ -36,7 +38,17 @@ class OfferingReport extends Model
         'total_cop_to_bs',
         'grand_total_bs',
         'remarks',
+        'status', // ✅ Asegurar que está aquí
     ];
+
+    
+
+    protected static function booted()
+    {
+        static::addGlobalScope('accessControl', function (Builder $query) {
+            OfferingReportFilterService::applyFilters($query);
+        });
+    }
 
     public function getActivitylogOptions(): LogOptions
     {
@@ -53,12 +65,38 @@ class OfferingReport extends Model
 
         static::creating(function ($offeringReport) {
             if (!$offeringReport->treasury_id) {
-                // Buscar la tesorería sectorial correspondiente al sector del pastor
-                $offeringReport->treasury_id = Treasury::where('sector_id', $offeringReport->sector_id)
-                    ->where('level', 'sectorial')
-                    ->first()?->id;
+                // 🔹 Determinar el nivel de tesorería en función del sector, distrito o región
+                $level = null;
+        
+                if ($offeringReport->sector_id) {
+                    $level = 'Sectorial'; // Para sectorial
+                } elseif ($offeringReport->district_id) {
+                    $level = 'Distrital'; // Para distrital
+                } elseif ($offeringReport->region_id) {
+                    $level = 'Regional'; // Para regional
+                }
+        
+                // 🔹 Si no se definió el nivel, lanzar error
+                if (!$level) {
+                    \Log::error("⚠ Error: No se pudo determinar el nivel de tesorería en OfferingReport.");
+                    throw new \Exception("No se encontró una tesorería válida para este reporte.");
+                }
+        
+                // 🔹 Buscar la tesorería correspondiente según el nivel
+                $offeringReport->treasury_id = Treasury::where('level', $level)->first()?->id;
+        
+                // 🔹 Si no se encontró una tesorería, registrar error
+                if (!$offeringReport->treasury_id) {
+                    \Log::error("⚠ Error: No se encontró una tesorería para level={$level}");
+                    throw new \Exception("No se encontró una tesorería correspondiente al nivel {$level}");
+                }
+            }
+            // ✅ Solo establecer 'pendiente' si el campo está vacío
+            if (!$offeringReport->status) {
+                $offeringReport->status = 'pendiente';
             }
         });
+        
 
         // ✅ Ya NO es necesario ejecutar distributeOfferings() aquí
         static::created(function ($offeringReport) {
@@ -82,9 +120,6 @@ class OfferingReport extends Model
             TreasuryAllocation::where('offering_report_id', $offeringReport->id)->delete();
         });
     }
-
-
-
 
 
     /**
@@ -116,10 +151,12 @@ class OfferingReport extends Model
             $categoryTotal = $this->offeringItems()
                 ->where('offering_category_id', $distribution->offering_category_id)
                 ->sum('subtotal_bs');
+
             Log::info("📊 Total de la categoría {$distribution->offering_category_id}: {$categoryTotal} Bs");
 
             // Calcular la cantidad a distribuir
             $distributedAmount = ($categoryTotal * $distribution->percentage) / 100;
+
             Log::info("💰 Monto a distribuir ({$distribution->percentage}%): {$distributedAmount} Bs para Tesorería ID {$distribution->target_treasury_id}");
 
             if (!$distribution->targetTreasury) {
@@ -127,20 +164,38 @@ class OfferingReport extends Model
                 continue;
             }
 
-            // ✅ Asegurar que el mes esté presente en `TreasuryAllocation`
-            TreasuryAllocation::create([
+            // ✅ Verificar si ya existe una asignación para esta combinación
+            $existingAllocation = TreasuryAllocation::where([
                 'offering_report_id' => $this->id,
                 'treasury_id' => $distribution->target_treasury_id,
                 'offering_category_id' => $distribution->offering_category_id,
-                'amount' => $distributedAmount,
-                'percentage' => $distribution->percentage,
-                'month' => $this->month ?? date('Y-m'), // ✅ Se asegura que siempre tenga un valor
-                'remarks' => "Distribución automática a " . strtoupper($distribution->targetTreasury->name),
-            ]);
+                'month' => $this->month,
+            ])->first();
 
-            Log::info("✅ Asignación creada para la Tesorería: {$distribution->targetTreasury->name}");
+            if ($existingAllocation) {
+                // ✅ Si existe, actualizar el monto y el porcentaje
+                $existingAllocation->update([
+                    'amount' => $distributedAmount,
+                    'percentage' => $distribution->percentage,
+                    'remarks' => "Actualización automática de distribución a " . strtoupper($distribution->targetTreasury->name),
+                ]);
+                Log::info("♻️ Actualización de asignación para Tesorería: {$distribution->targetTreasury->name}");
+            } else {
+                // ✅ Si no existe, crear una nueva asignación
+                TreasuryAllocation::create([
+                    'offering_report_id' => $this->id,
+                    'treasury_id' => $distribution->target_treasury_id,
+                    'offering_category_id' => $distribution->offering_category_id,
+                    'amount' => $distributedAmount,
+                    'percentage' => $distribution->percentage,
+                    'month' => $this->month ?? date('Y-m'), // ✅ Se asegura que siempre tenga un valor
+                    'remarks' => "Distribución automática a " . strtoupper($distribution->targetTreasury->name),
+                ]);
+                Log::info("✅ Nueva asignación creada para la Tesorería: {$distribution->targetTreasury->name}");
+            }
         }
     }
+
 
 
 

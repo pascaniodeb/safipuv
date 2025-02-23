@@ -26,11 +26,6 @@ class ChurchResource extends Resource
 
     protected static ?int $navigationSort = 3; // Orden
 
-    public static function getEloquentQuery(): Builder
-    {
-        // Aplica la lógica de control de acceso al recurso
-        return static::scopeAccessControlQuery(parent::getEloquentQuery());
-    }
 
     public static function getNavigationGroup(): ?string
     {
@@ -60,6 +55,17 @@ class ChurchResource extends Resource
         $modelClass = static::$model;
 
         return (string) $modelClass::count(); // Personaliza según sea necesario
+    }
+
+    public static function canCreate(): bool
+    {
+        $user = auth()->user();
+
+        return $user && $user->hasAnyRole([
+            'Secretario Nacional',
+            'Secretario Regional',
+            'Secretario Sectorial',
+        ]);
     }
 
     
@@ -413,7 +419,18 @@ class ChurchResource extends Resource
                                     $query = \App\Models\Pastor::query();
 
                                     // Aplicar filtros según el rol del usuario
-                                    if ($user->hasAnyRole(['Administrador', 'Secretario Nacional', 'Tesorero Nacional'])) {
+                                    if ($user->hasAnyRole([
+                                        'Administrador',
+                                        'Secretario Nacional',
+                                        'Tesorero Nacional',
+                                        'Superintendente Regional',
+                                        'Secretario Regional',
+                                        'Tesorero Regional',
+                                        'Supervisor Distrital',
+                                        'Presbítero Sectorial',
+                                        'Secretario Sectorial',
+                                        'Tesorero Sectorial',
+                                        ])) {
                                         // Roles nacionales ven todas las cédulas, incluidos los pastores titulares
                                         return $query->pluck('number_cedula', 'id');
                                     }
@@ -514,9 +531,13 @@ class ChurchResource extends Resource
                                         'Administrador',
                                         'Secretario Nacional',
                                         'Tesorero Nacional',
+                                        'Superintendente Regional',
                                         'Secretario Regional',
-                                        'Secretario Distrital',
+                                        'Tesorero Regional',
+                                        'Supervisor Distrital',
+                                        'Presbítero Sectorial',
                                         'Secretario Sectorial',
+                                        'Tesorero Sectorial',
                                     ]);
                                 })
                                 ->dehydrated(),
