@@ -15,6 +15,8 @@ use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use App\Traits\AccessControlTrait;
 use Filament\Tables;
+use Filament\Tables\Actions\EditAction;
+use Filament\Tables\Actions\ViewAction;
 use ZipArchive;
 use Illuminate\Support\Facades\Storage;
 use Filament\Tables\Table;
@@ -70,15 +72,26 @@ class PastorResource extends Resource
         ];
     }
 
-    public static function canCreate(): bool
+    public function view(?User $user, Pastor $pastor): bool
     {
-        $user = auth()->user();
+        return true; // Todos los usuarios pueden ver
+    }
 
+    public function update(?User $user, Pastor $pastor): bool
+    {
         return $user && $user->hasAnyRole([
             'Secretario Nacional',
             'Secretario Regional',
             'Secretario Sectorial',
         ]);
+    }
+
+    protected static function getTableRecordUrl(Model $record): ?string
+    {
+        if(auth()->user()?->can('update', $record)){
+            return static::getUrl('edit', ['record' => $record]);
+        }
+        return null;
     }
 
     public static function getEloquentQuery(): Builder
@@ -106,61 +119,68 @@ class PastorResource extends Resource
                                         Forms\Components\TextInput::make('name')
                                             ->label('Nombre')
                                             ->required()
-                                            ->maxLength(255)
-                                            ->disabled(function () {
-                                                // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                                return !Auth::user()->hasAnyRole([
-                                                    'Administrador',
-                                                    'Secretario Nacional',
-                                                    'Tesorero Nacional',
-                                                    'Secretario Regional',
-                                                    'Secretario Sectorial', 
-                                                ]);
-                                            })
-                                            ->dehydrated(),
+                                            ->maxLength(45),
+                                            
+                                            
                                         Forms\Components\TextInput::make('lastname')
                                             ->label('Apellido')
                                             ->required()
-                                            ->maxLength(255)
-                                            ->disabled(function () {
-                                                // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                                return !Auth::user()->hasAnyRole([
-                                                    'Administrador',
-                                                    'Secretario Nacional',
-                                                    'Tesorero Nacional',
-                                                    'Secretario Regional',
-                                                    'Secretario Sectorial', 
-                                                ]);
-                                            })
-                                            ->dehydrated(),
+                                            ->maxLength(45),
+                                            
+                                            
                                         Forms\Components\Select::make('nationality_id')
                                             ->label('Nacionalidad')
                                             ->relationship('nationality', 'name')
                                             ->required()
-                                            ->disabled(function () {
-                                                // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                                return !Auth::user()->hasAnyRole([
-                                                    'Administrador',
-                                                    'Secretario Nacional',
-                                                    'Tesorero Nacional',
-                                                    'Secretario Regional',
-                                                    'Secretario Sectorial', 
-                                                ]);
+                                            ->disabled(function ($livewire) {
+                                                // Permitir edición en la creación
+                                                if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+                                                    return false;
+                                                }
+                                        
+                                                // En la edición, restringir según roles
+                                                if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
+                                                    return !auth()->user()->hasAnyRole([
+                                                        'Administrador',
+                                                        'Secretario Nacional',
+                                                        'Tesorero Nacional',
+                                                        'Secretario Regional',
+                                                        'Supervisor Distrital',
+                                                    ]);
+                                                }
+                                        
+                                                // Otros casos (si los hay), puedes decidir aquí
+                                                return false; // Por defecto, habilitado si no es ni creación ni edición
                                             })
                                             ->dehydrated(),
+                                            
                                         Forms\Components\TextInput::make('number_cedula')
                                             ->label('Número de Cédula')
                                             ->required()
                                             ->maxLength(255)
-                                            ->disabled(function () {
-                                                // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                                return !Auth::user()->hasAnyRole([
-                                                    'Administrador',
-                                                    'Secretario Nacional',
-                                                    'Tesorero Nacional', 
-                                                ]);
+                                            ->disabled(function ($livewire) {
+                                                // Permitir edición en la creación
+                                                if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+                                                    return false;
+                                                }
+                                        
+                                                // En la edición, restringir según roles
+                                                if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
+                                                    return !auth()->user()->hasAnyRole([
+                                                        'Administrador',
+                                                        'Secretario Nacional',
+                                                        'Tesorero Nacional',
+                                                        'Secretario Regional',
+                                                        'Supervisor Distrital',
+                                                    ]);
+                                                }
+                                        
+                                                // Otros casos (si los hay), puedes decidir aquí
+                                                return false; // Por defecto, habilitado si no es ni creación ni edición
                                             })
                                             ->dehydrated(),
+                                        
+                                        
                                     ]),
 
                             ])
@@ -230,13 +250,23 @@ class PastorResource extends Resource
                                 ->label('Fecha de Inicio del Ministerio')
                                 ->required()
                                 ->columnSpan(['default' => 3, 'md' => 1])
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                    ]);
+                                ->disabled(function ($livewire) {
+                                    // Permitir edición en la creación
+                                    if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+                                        return false;
+                                    }
+                            
+                                    // En la edición, restringir según roles
+                                    if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
+                                        return !auth()->user()->hasAnyRole([
+                                            'Administrador',
+                                            'Secretario Nacional',
+                                            'Tesorero Nacional',
+                                        ]);
+                                    }
+                            
+                                    // Otros casos (si los hay), puedes decidir aquí
+                                    return false; // Por defecto, habilitado si no es ni creación ni edición
                                 })
                                 ->dehydrated(),
 
@@ -258,15 +288,24 @@ class PastorResource extends Resource
                                     ->reactive()
                                     ->afterStateUpdated(fn (callable $set) => $set('district_id', null))
                                     ->columnSpan(['default' => 3, 'md' => 1])
-                                    ->disabled(function () {
-                                        // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                        return !Auth::user()->hasAnyRole([
-                                            'Administrador',
-                                            'Secretario Nacional',
-                                            'Tesorero Nacional',
-                                            'Secretario Regional',
-                                            'Secretario Sectorial', 
-                                        ]);
+                                    ->disabled(function ($livewire) {
+                                        // Permitir edición en la creación
+                                        if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+                                            return false;
+                                        }
+                                
+                                        // En la edición, restringir según roles
+                                        if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
+                                            return !auth()->user()->hasAnyRole([
+                                                'Administrador',
+                                                'Secretario Nacional',
+                                                'Tesorero Nacional',
+                                                'Secretario Regional',
+                                            ]);
+                                        }
+                                
+                                        // Otros casos (si los hay), puedes decidir aquí
+                                        return false; // Por defecto, habilitado si no es ni creación ni edición
                                     })
                                     ->dehydrated(),
 
@@ -279,15 +318,25 @@ class PastorResource extends Resource
                                     ->afterStateUpdated(fn (callable $set) => $set('sector_id', null))
                                     ->disabled(fn (callable $get) => !$get('region_id'))
                                     ->columnSpan(['default' => 3, 'md' => 1])
-                                    ->disabled(function () {
-                                        // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                        return !Auth::user()->hasAnyRole([
-                                            'Administrador',
-                                            'Secretario Nacional',
-                                            'Tesorero Nacional',
-                                            'Secretario Regional',
-                                            'Secretario Sectorial', 
-                                        ]);
+                                    ->disabled(function ($livewire) {
+                                        // Permitir edición en la creación
+                                        if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+                                            return false;
+                                        }
+                                
+                                        // En la edición, restringir según roles
+                                        if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
+                                            return !auth()->user()->hasAnyRole([
+                                                'Administrador',
+                                                'Secretario Nacional',
+                                                'Tesorero Nacional',
+                                                'Secretario Regional',
+                                                
+                                            ]);
+                                        }
+                                
+                                        // Otros casos (si los hay), puedes decidir aquí
+                                        return false; // Por defecto, habilitado si no es ni creación ni edición
                                     })
                                     ->dehydrated(),
 
@@ -298,15 +347,25 @@ class PastorResource extends Resource
                                     ->required()
                                     ->disabled(fn (callable $get) => !$get('district_id'))
                                     ->columnSpan(['default' => 3, 'md' => 1])
-                                    ->disabled(function () {
-                                        // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                        return !Auth::user()->hasAnyRole([
-                                            'Administrador',
-                                            'Secretario Nacional',
-                                            'Tesorero Nacional',
-                                            'Secretario Regional',
-                                            'Secretario Sectorial', 
-                                        ]);
+                                    ->disabled(function ($livewire) {
+                                        // Permitir edición en la creación
+                                        if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+                                            return false;
+                                        }
+                                
+                                        // En la edición, restringir según roles
+                                        if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
+                                            return !auth()->user()->hasAnyRole([
+                                                'Administrador',
+                                                'Secretario Nacional',
+                                                'Tesorero Nacional',
+                                                'Secretario Regional',
+                                                'Supervisor Distrital',
+                                            ]);
+                                        }
+                                
+                                        // Otros casos (si los hay), puedes decidir aquí
+                                        return false; // Por defecto, habilitado si no es ni creación ni edición
                                     })
                                     ->dehydrated(),
 
@@ -652,14 +711,17 @@ class PastorResource extends Resource
                     }),
             ])
             ->actions([
-                
-                Tables\Actions\EditAction::make()
-                    ->hidden(fn () => !auth()->user()->hasAnyRole([
-                        'Obispo Presidente',
+                ViewAction::make()
+                    ->label('Ver')
+                    ->icon('heroicon-o-eye'),
+
+                EditAction::make()
+                    ->visible(fn () => auth()->user()?->hasAnyRole([
                         'Secretario Nacional',
-                        'Tesorero Nacional',
-                        'Administrador',
+                        'Secretario Regional',
+                        'Secretario Sectorial',
                     ])),
+                    
                 Tables\Actions\Action::make('generateCarnet')
                     ->icon('heroicon-o-identification') // Ícono tipo carnet
                     ->modalHeading('Generar Carnet')
@@ -719,6 +781,14 @@ class PastorResource extends Resource
 
 
             ])
+            ->recordUrl(fn ($record) => auth()->user()?->hasAnyRole([
+                'Administrador',
+                'Secretario Nacional',
+                'Tesorero Nacional',
+                'Secretario Regional',
+                'Supervisor Distrital',
+                'Secretario Sectorial',
+            ]) ? PastorResource::getUrl('edit', ['record' => $record]) : null) // Solo los autorizados pueden abrir la edición al hacer clic
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
                     Tables\Actions\DeleteBulkAction::make(),

@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
 
-class User extends Authenticatable implements HasAvatar
+class User extends Authenticatable implements HasAvatar, FilamentUser
 {
     use HasRoles, HasFactory, Notifiable, SoftDeletes, LogsActivity;
 
@@ -133,11 +133,10 @@ class User extends Authenticatable implements HasAvatar
         return 'https://ui-avatars.com/api/?name=' . urlencode($this->name);
     }
     
-    public function canAccessFilament(): bool
+    public function canAccessPanel(Panel $panel): bool
     {
-        // Lista de roles permitidos
-        $allowedRoles = [
-            //'Administrador',
+        return $this->hasRole([
+            'Administrador',
             'Obispo Presidente',
             'Obispo Vicepresidente',
             'Secretario Nacional',
@@ -158,9 +157,6 @@ class User extends Authenticatable implements HasAvatar
             'Contralor Sectorial',
             'Directivo Sectorial',
             'Pastor'
-        ];
-
-        // Verificar si el usuario tiene alguno de los roles permitidos
-        return $this->hasAnyRole($allowedRoles);
+        ]);
     }
 }

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Builder;
 use App\Services\OfferingReportFilterService;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
@@ -41,7 +42,19 @@ class OfferingReport extends Model
         'status', // ✅ Asegurar que está aquí
     ];
 
-    
+    public static function generateReportNumber()
+    {
+        return DB::transaction(function () {
+            // Bloquea la fila para evitar concurrencia
+            $sequence = DB::table('report_sequences')->where('type', 'report')->lockForUpdate()->first();
+
+            // Incrementa el número de reporte
+            $newNumber = $sequence->last_number + 1;
+
+            // No actualizamos la base de datos aquí aún, solo generamos el número
+            return 'REP-' . str_pad($newNumber, 9, '0', STR_PAD_LEFT);
+        });
+    }
 
     protected static function booted()
     {
@@ -94,6 +107,18 @@ class OfferingReport extends Model
             // ✅ Solo establecer 'pendiente' si el campo está vacío
             if (!$offeringReport->status) {
                 $offeringReport->status = 'pendiente';
+            }
+            // Si el número de reporte no ha sido asignado (seguridad extra)
+            if (empty($report->number_report)) {
+                // Ahora sí actualizamos la base de datos cuando el registro se guarda
+                DB::transaction(function () {
+                    DB::table('report_sequences')
+                        ->where('type', 'report')
+                        ->update(['last_number' => DB::raw('last_number + 1')]);
+                });
+
+                // Asignamos el número de reporte final
+                $report->number_report = self::generateReportNumber();
             }
         });
         

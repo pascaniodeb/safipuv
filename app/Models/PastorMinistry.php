@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Services\PastorLicenceService;
 use Illuminate\Database\Eloquent\Model;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
@@ -54,6 +55,27 @@ class PastorMinistry extends Model
         static::creating(function ($ministry) {
             // Asegura que 'start_date_ministry' se copie del pastor relacionado al crear un registro
             $ministry->start_date_ministry = $ministry->pastor->start_date_ministry;
+        });
+    }
+
+    protected static function booted()
+    {
+        static::creating(function ($pastorMinistry) {
+            // 🔹 Asignar automáticamente la licencia al CREAR un pastor
+            $pastorMinistry->pastor_licence_id = PastorLicenceService::determineLicence(
+                $pastorMinistry->pastor_income_id,
+                $pastorMinistry->pastor_type_id,
+                $pastorMinistry->start_date_ministry
+            );
+        });
+
+        static::updating(function ($pastorMinistry) {
+            // 🔹 Asignar automáticamente la licencia al ACTUALIZAR un pastor
+            $pastorMinistry->pastor_licence_id = PastorLicenceService::determineLicence(
+                $pastorMinistry->pastor_income_id,
+                $pastorMinistry->pastor_type_id,
+                $pastorMinistry->start_date_ministry
+            );
         });
     }
 

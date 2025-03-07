@@ -6,6 +6,7 @@ use Filament\Forms;
 use Filament\Forms\Form;
 use App\Models\Pastor;
 use App\Models\Church;
+use App\Services\PastorLicenceService;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Resources\RelationManagers\Concerns\InteractsWithTable;
 use Filament\Resources\RelationManagers\Concerns\InteractsWithForms;
@@ -82,158 +83,174 @@ class MinistryRelationManager extends RelationManager
     {
         return $form
             ->schema([
-                Forms\Components\DatePicker::make('start_date_ministry')
-                    ->label('Fecha de Inicio del Ministerio')
-                    ->default(fn () => $this->getOwnerRecord()?->start_date_ministry) // Toma el valor del pastor relacionado
-                    ->disabled(function () {
-                        // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                        return !Auth::user()->hasAnyRole([
-                            'Administrador',
-                            'Secretario Nacional',
-                            'Tesorero Nacional',
-                        ]);
-                    })
-                    ->dehydrated(),
-
-
-                Forms\Components\TextInput::make('code_pastor')
-                    ->label('Código del Pastor')
-                    ->numeric()
-                    ->required()
-                    ->default(function () {
-                        $pastor = $this->getOwnerRecord(); // Obtén el pastor relacionado
-                        if (!$pastor) {
-                            return null;
-                        }
-                
-                        // 1. Obtener los últimos 4 dígitos del número de cédula
-                        $lastFourCedula = substr($pastor->number_cedula, -4);
-                
-                        // 2. Obtener el año del campo start_date_ministry
-                        $ministryYear = $pastor->start_date_ministry?->format('Y');
-                
-                        // 3. Calcular el número incremental para el año
-                        $incrementable = \App\Models\Pastor::whereYear('start_date_ministry', $ministryYear)
-                            ->count() + 1; // Contar pastores registrados en el mismo año y sumar 1
-                
-                        // 4. Formatear el número incremental con 4 dígitos
-                        $incrementable = str_pad($incrementable, 4, '0', STR_PAD_LEFT);
-                
-                        // 5. Generar el código completo
-                        return $lastFourCedula . $ministryYear . $incrementable;
-                    })
-                    ->maxLength(12)
-                    ->minLength(12)
-                    ->rule('digits:12')
-                    ->dehydrateStateUsing(fn ($state, $record) => $record ? $record->code_pastor : $state)
-                    ->disabled()
-                    ->dehydrated(),
                     
 
-                Forms\Components\Select::make('pastor_type_id')
-                    ->label('Tipo de Pastor')
-                    ->relationship('pastorType', 'name')
-                    ->native(false)
-                    ->placeholder('Seleccione un tipo de pastor')
-                    ->disabled(function () {
-                        // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                        return !Auth::user()->hasAnyRole([
-                            'Administrador',
-                            'Secretario Nacional',
-                            'Tesorero Nacional',
-                            'Secretario Regional',
-                            'Secretario Sectorial', 
-                        ]);
-                    })
-                    ->dehydrated(),
 
-                Forms\Components\Select::make('pastor_income_id')
-                    ->label('Ingreso Pastoral')
-                    ->relationship('pastorIncome', 'name')
-                    ->native(false)
-                    ->placeholder('Selecciona un ingreso')
-                    ->disabled(function () {
-                        // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                        return !Auth::user()->hasAnyRole([
-                            'Administrador',
-                            'Secretario Nacional',
-                            'Tesorero Nacional',
-                            'Secretario Regional',
-                            'Secretario Sectorial', 
-                        ]);
-                    })
-                    ->dehydrated(),
-
-                
-
-                Forms\Components\Select::make('church_id')
-                    ->label('Iglesia Asociada')
-                    ->options(\App\Models\Church::pluck('name', 'id'))
-                    ->searchable()
-                    ->placeholder('Selecciona una iglesia')
-                    ->reactive()
-                    ->nullable()
-                    ->afterStateUpdated(function ($state, callable $set, callable $get) {
-                        if ($state) {
-                            // Buscar la iglesia seleccionada
-                            $church = \App\Models\Church::find($state);
-                
-                            // Validar que la iglesia exista
-                            if (!$church) {
-                                $set('church_id', null);
-                
-                                Notification::make()
-                                    ->title('Error')
-                                    ->body('La iglesia seleccionada no existe.')
-                                    ->danger()
-                                    ->send();
-                
-                                return; // Salir del método para evitar errores
+                    Forms\Components\TextInput::make('code_pastor')
+                        ->label('Código del Pastor')
+                        ->numeric()
+                        ->required()
+                        ->default(function () {
+                            $pastor = $this->getOwnerRecord(); // Obtén el pastor relacionado
+                            if (!$pastor) {
+                                return null;
                             }
+                    
+                            // 🔹 1. Obtener los últimos 4 dígitos del número de cédula
+                            $lastFourCedula = substr($pastor->number_cedula, -4);
+                    
+                            // 🔹 2. Obtener el año del campo start_date_ministry
+                            $ministryYear = $pastor->start_date_ministry?->format('Y');
+                    
+                            // 🔹 3. Calcular el número incremental global para el año
+                            $incrementable = \App\Models\Pastor::whereYear('start_date_ministry', $ministryYear)
+                                ->withoutGlobalScopes() // ✅ Ignorar cualquier restricción de visibilidad de usuario
+                                ->count() + 1; // ✅ Contar todos los pastores registrados en el mismo año y sumar 1
+                    
+                            // 🔹 4. Formatear el número incremental con 4 dígitos
+                            $incrementable = str_pad($incrementable, 4, '0', STR_PAD_LEFT);
+                    
+                            // 🔹 5. Generar el código completo
+                            return $lastFourCedula . $ministryYear . $incrementable;
+                        })
+                        ->maxLength(12)
+                        ->minLength(12)
+                        ->rule('digits:12')
+                        ->dehydrateStateUsing(fn ($state, $record) => $record ? $record->code_pastor : $state)
+                        ->disabled()
+                        ->dehydrated(),
                 
-                            // Verificar si la iglesia ya tiene un pastor titular
-                            if ($church->titularPastor()->exists()) {
-                                $set('church_id', null);
+
                 
-                                Notification::make()
-                                    ->title('Error')
-                                    ->body('Esta iglesia ya tiene un pastor Titular asignado.')
-                                    ->danger()
-                                    ->send();
-                
-                                return; // Salir del método para evitar asignar valores
-                            }
-                
-                            // Asignar los campos relacionados con la iglesia
-                            $set('code_church', $church->code_church);
-                            $set('region_id', $church->region_id);
-                            $set('district_id', $church->district_id);
-                            $set('sector_id', $church->sector_id);
-                            $set('state_id', $church->state_id);
-                            $set('city_id', $church->city_id);
-                            $set('address', $church->address);
-                        } else {
-                            // Limpiar los campos relacionados si se deselecciona la iglesia
-                            $set('code_church', null);
-                            $set('region_id', null);
-                            $set('district_id', null);
-                            $set('sector_id', null);
-                            $set('state_id', null);
-                            $set('city_id', null);
-                            $set('address', null);
-                        }
-                    })
-                    ->disabled(function () {
-                        // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                        return !Auth::user()->hasAnyRole([
+                    Forms\Components\Select::make('pastor_income_id')
+                        ->label('Ingreso Pastoral')
+                        ->relationship('pastorIncome', 'name')
+                        ->native(false)
+                        ->placeholder('Selecciona un ingreso')
+                        ->reactive() // 🔹 Permite que al cambiar este campo, otros valores dependientes se recalculen
+                        ->afterStateUpdated(fn (callable $set, callable $get) => 
+                            $set('pastor_licence_id', \App\Services\PastorLicenceService::determineLicence(
+                                $get('pastor_income_id'), 
+                                $get('pastor_type_id'),
+                                $get('start_date_ministry')
+                            ))
+                        ) // 🔹 Actualiza automáticamente la licencia
+                        ->disabled(fn () => !Auth::user()->hasAnyRole([
                             'Administrador',
                             'Secretario Nacional',
                             'Tesorero Nacional',
                             'Secretario Regional',
                             'Secretario Sectorial', 
-                        ]);
-                    })
-                    ->dehydrated(),
+                        ]))
+                        ->dehydrated(),
+                
+                    Forms\Components\Select::make('pastor_type_id')
+                        ->label('Tipo de Pastor')
+                        ->relationship('pastorType', 'name')
+                        ->native(false)
+                        ->placeholder('Seleccione un tipo de pastor')
+                        ->reactive() // 🔹 Permite que al cambiar este campo, la licencia también se recalcule
+                        ->afterStateUpdated(fn (callable $set, callable $get) => 
+                            $set('pastor_licence_id', \App\Services\PastorLicenceService::determineLicence(
+                                $get('pastor_income_id'), 
+                                $get('pastor_type_id'),
+                                $get('start_date_ministry')
+                            ))
+                        ) // 🔹 Se recalcula automáticamente la licencia pastoral
+                        ->disabled(fn () => !Auth::user()->hasAnyRole([
+                            'Administrador',
+                            'Secretario Nacional',
+                            'Tesorero Nacional',
+                            'Secretario Regional',
+                            'Secretario Sectorial', 
+                        ]))
+                        ->dehydrated(),
+                
+
+    
+                    Forms\Components\Select::make('church_id')
+                        ->label('Iglesia Asociada')
+                        ->options(\App\Models\Church::pluck('name', 'id'))
+                        ->searchable()
+                        ->placeholder('Selecciona una iglesia')
+                        ->reactive()
+                        ->nullable()
+                        ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                            if ($state) {
+                                // 🔍 Buscar la iglesia seleccionada
+                                $church = \App\Models\Church::find($state);
+                    
+                                // ❌ Validar que la iglesia exista
+                                if (!$church) {
+                                    $set('church_id', null);
+                                    Notification::make()
+                                        ->title('Error')
+                                        ->body('La iglesia seleccionada no existe.')
+                                        ->danger()
+                                        ->send();
+                                    return;
+                                }
+                    
+                                // 🔍 Obtener el tipo de pastor seleccionado
+                                $pastorTypeId = $get('pastor_type_id'); // ✅ Obtener el ID del tipo de pastor
+                    
+                                // 🔹 Verificar la cantidad de pastores asignados por tipo
+                                $pastorCounts = $church->pastorMinistries()
+                                    ->selectRaw('pastor_type_id, COUNT(*) as count')
+                                    ->groupBy('pastor_type_id')
+                                    ->pluck('count', 'pastor_type_id');
+                    
+                                // 🔹 Definir los límites máximos permitidos
+                                $maxPastorsByType = [
+                                    1 => 1, // ✅ 1 Pastor Titular
+                                    2 => 1, // ✅ 1 Pastor Adjunto
+                                    3 => 1, // ✅ 1 Pastor Asistente
+                                    4 => 1, // ✅ 1 Pastora Titular
+                                ];
+                    
+                                // ❌ Si el tipo de pastor ya alcanzó el máximo, bloquear la asignación
+                                if (isset($maxPastorsByType[$pastorTypeId]) && ($pastorCounts[$pastorTypeId] ?? 0) >= $maxPastorsByType[$pastorTypeId]) {
+                                    $set('church_id', null);
+                                    Notification::make()
+                                        ->title('Error')
+                                        ->body('Esta iglesia ya tiene el máximo permitido de este tipo de pastor.')
+                                        ->danger()
+                                        ->send();
+                                    return;
+                                }
+                    
+                                // ✅ Asignar los campos relacionados con la iglesia
+                                $set('code_church', $church->code_church);
+                                $set('region_id', $church->region_id);
+                                $set('district_id', $church->district_id);
+                                $set('sector_id', $church->sector_id);
+                                $set('state_id', $church->state_id);
+                                $set('city_id', $church->city_id);
+                                $set('address', $church->address);
+                            } else {
+                                // 🧹 Limpiar los campos relacionados si se deselecciona la iglesia
+                                $set('code_church', null);
+                                $set('region_id', null);
+                                $set('district_id', null);
+                                $set('sector_id', null);
+                                $set('state_id', null);
+                                $set('city_id', null);
+                                $set('address', null);
+                            }
+                        })
+                        ->disabled(function () {
+                            // 🔹 Deshabilitar el campo si el usuario no tiene los roles permitidos
+                            return !Auth::user()->hasAnyRole([
+                                'Administrador',
+                                'Secretario Nacional',
+                                'Tesorero Nacional',
+                                'Secretario Regional',
+                                'Secretario Sectorial', 
+                            ]);
+                        })
+                        ->dehydrated(),
+                
+                
 
 
 
@@ -431,54 +448,36 @@ class MinistryRelationManager extends RelationManager
 
 
                     
+                    Forms\Components\Select::make('pastor_licence_id')
+                        ->label('Licencia Pastoral')
+                        ->relationship('pastorLicence', 'name')
+                        ->placeholder('Selecciona una licencia')
+                        ->default(function (callable $get) {
+                            return PastorLicenceService::determineLicence(
+                                $get('pastor_income_id'),
+                                $get('pastor_type_id'),
+                                $get('start_date_ministry')
+                            );
+                        })
+                        ->reactive()
+                        ->native(false)
+                        ->afterStateUpdated(function (callable $set, callable $get) {
+                            // ✅ Solo recalcula si no se ha editado manualmente
+                            if (!is_numeric($get('pastor_licence_id'))) {
+                                $set('pastor_licence_id', PastorLicenceService::determineLicence(
+                                    $get('pastor_income_id'),
+                                    $get('pastor_type_id'),
+                                    $get('start_date_ministry')
+                                ));
+                            }
+                        })
+                        ->disabled(fn () => !Auth::user()->hasAnyRole(['Administrador', 'Secretario Nacional']))
+                        ->dehydrated(),
+
 
                 
-
-                Forms\Components\Select::make('pastor_licence_id')
-                    ->label('Licencia Pastoral')
-                    ->relationship('pastorLicence', 'name')
-                    ->placeholder('Selecciona una licencia')
-                    ->default(function (callable $get) {
-                        $startDate = $get('start_date_ministry');
-
-                        if ($startDate) {
-                            $startDate = \Illuminate\Support\Carbon::parse($startDate)->startOfDay();
-                            $today = now()->startOfDay();
-                            $daysInMinistry = $startDate->diffInDays($today);
-
-                            if ($daysInMinistry <= 1095) {
-                                return 1; // ID de licencia LOCAL
-                            } elseif ($daysInMinistry > 1095 && $daysInMinistry <= 2190) {
-                                return 2; // ID de licencia NACIONAL
-                            } elseif ($daysInMinistry > 2190) {
-                                return 3; // ID de licencia ORDENACIÓN
-                            }
-                        }
-
-                        return null;
-                    })
-                    ->reactive() // Reactivo para recalcular si cambia la fecha
-                    ->native(false)
-                    ->afterStateUpdated(function ($state, callable $set) {
-                        if ($state) {
-                            $startDate = \Illuminate\Support\Carbon::parse($state)->startOfDay();
-                            $today = now()->startOfDay();
-                            $daysInMinistry = $startDate->diffInDays($today);
-
-                            if ($daysInMinistry <= 1095) {
-                                $set('pastor_licence_id', 1); // LOCAL
-                            } elseif ($daysInMinistry > 1095 && $daysInMinistry <= 2190) {
-                                $set('pastor_licence_id', 2); // NACIONAL
-                            } elseif ($daysInMinistry > 2190) {
-                                $set('pastor_licence_id', 3); // ORDENACIÓN
-                            }
-                        }
-                    })
-                    ->disabled(function () {
-                        // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                        return !Auth::user()->hasAnyRole(['Administrador', 'Secretario Nacional']);
-                    })
-                    ->dehydrated(),
+                
+                
 
                     
 
@@ -573,7 +572,7 @@ class MinistryRelationManager extends RelationManager
                     ->searchable()
                     ->sortable(),
 
-                Tables\Columns\TextColumn::make('start_date_ministry')
+                Tables\Columns\TextColumn::make('pastor.start_date_ministry') // Accede a la relación pastor y su campo start_date_ministry
                     ->label('Inicio Ministerio')
                     ->date()
                     ->sortable(),

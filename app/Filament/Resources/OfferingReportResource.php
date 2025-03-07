@@ -462,11 +462,14 @@ class OfferingReportResource extends Resource
                     
                     TextInput::make('number_report')
                         ->label('Número de Reporte')
-                        ->default(fn () => 'REP-' . str_pad(OfferingReport::max('id') + 1, 9, '0', STR_PAD_LEFT)) // Genera un número único
+                        ->default(fn () => OfferingReport::generateReportNumber()) // Muestra el número al usuario
                         ->disabled()
-                        ->dehydrated() // Se enviará al backend
+                        ->dehydrated()
                         ->unique(OfferingReport::class, 'number_report', ignoreRecord: true)
                         ->required(),
+                    
+                    
+                    
                     
                     Forms\Components\Select::make('month')
                         ->label('Mes de Registro')

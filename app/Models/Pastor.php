@@ -160,6 +160,8 @@ class Pastor extends Model
         return $this->hasMany(PastorMinistry::class);
     }
 
+    
+
     // Relación con PastorMinistry
     public function ministry()
     {
