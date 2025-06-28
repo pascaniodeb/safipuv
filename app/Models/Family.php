@@ -30,6 +30,9 @@ class Family extends Model
         'career',
         'phone_mobile',
         'phone_house',
+        'photo_spouse',
+        'position_type_id',
+        'current_position_id',
         'email',
     ];
 
@@ -104,6 +107,16 @@ class Family extends Model
     public function academicLevel()
     {
         return $this->belongsTo(AcademicLevel::class);
+    }
+
+    public function positionType()
+    {
+        return $this->belongsTo(PositionType::class);
+    }
+
+    public function currentPosition()
+    {
+        return $this->belongsTo(CurrentPosition::class, 'current_position_id');
     }
 
 

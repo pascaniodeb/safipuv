@@ -6,7 +6,12 @@ use App\Filament\Resources\PastorResource\Pages;
 use App\Filament\Resources\PastorResource\RelationManagers;
 use App\Filament\Resources\PastorResource\RelationManagers\FamilyRelationManager;
 use App\Filament\Resources\PastorResource\RelationManagers\MinistryRelationManager;
+use App\Models\Region;
+use App\Models\District;
+use App\Models\Sector;
 use App\Services\CarnetService;
+use App\Services\HojaDeVidaService;
+use App\Services\NombramientoService;
 use Illuminate\Support\Facades\Auth;
 use Filament\Notifications\Notification;
 use App\Models\Pastor;
@@ -14,23 +19,34 @@ use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use App\Traits\AccessControlTrait;
+use App\Traits\Filters\HasUbicacionGeograficaFilters;
+use App\Services\TerritorialFormService;
+use Filament\Tables\Actions\LinkAction;
 use Filament\Tables;
+use Filament\Forms\Get;
+use Filament\Forms\Set;
+use Filament\Tables\Filters\SelectFilter;
+use App\Filament\Filters\UbicacionFilters;
 use Filament\Tables\Actions\EditAction;
 use Filament\Tables\Actions\ViewAction;
-use ZipArchive;
+use Filament\Tables\Actions\Action;
 use Illuminate\Support\Facades\Storage;
+use ZipArchive;
+use Illuminate\Support\Facades\Log;
 use Filament\Tables\Table;
+use Filament\Tables\Actions\DeleteBulkAction;
+use Filament\Tables\Actions\BulkActionGroup;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class PastorResource extends Resource
 {
     use AccessControlTrait;
+    use HasUbicacionGeograficaFilters;
     
     protected static ?string $model = Pastor::class;
 
     protected static ?int $navigationSort = 2; // Orden
-
 
     public static function getPluralModelLabel(): string
     {
@@ -83,6 +99,9 @@ class PastorResource extends Resource
             'Secretario Nacional',
             'Secretario Regional',
             'Secretario Sectorial',
+            'Tesorero Nacional',
+            'Tesorero Sectorial',
+            'Pastor',
         ]);
     }
 
@@ -157,7 +176,7 @@ class PastorResource extends Resource
                                         Forms\Components\TextInput::make('number_cedula')
                                             ->label('Número de Cédula')
                                             ->required()
-                                            ->maxLength(255)
+                                            ->maxLength(8)
                                             ->disabled(function ($livewire) {
                                                 // Permitir edición en la creación
                                                 if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
@@ -281,117 +300,63 @@ class PastorResource extends Resource
                     ->schema([
                         Forms\Components\Grid::make(3) // Tres columnas
                             ->schema([
-                                Forms\Components\Select::make('region_id')
-                                    ->label('Región')
-                                    ->relationship('region', 'name')
-                                    ->required()
-                                    ->reactive()
-                                    ->afterStateUpdated(fn (callable $set) => $set('district_id', null))
-                                    ->columnSpan(['default' => 3, 'md' => 1])
-                                    ->disabled(function ($livewire) {
-                                        // Permitir edición en la creación
-                                        if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
-                                            return false;
-                                        }
-                                
-                                        // En la edición, restringir según roles
-                                        if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
-                                            return !auth()->user()->hasAnyRole([
-                                                'Administrador',
-                                                'Secretario Nacional',
-                                                'Tesorero Nacional',
-                                                'Secretario Regional',
-                                            ]);
-                                        }
-                                
-                                        // Otros casos (si los hay), puedes decidir aquí
-                                        return false; // Por defecto, habilitado si no es ni creación ni edición
-                                    })
-                                    ->dehydrated(),
-
-                                Forms\Components\Select::make('district_id')
-                                    ->label('Distrito')
-                                    ->options(fn (callable $get) =>
-                                        \App\Models\District::where('region_id', $get('region_id'))->pluck('name', 'id'))
-                                    ->required()
-                                    ->reactive()
-                                    ->afterStateUpdated(fn (callable $set) => $set('sector_id', null))
-                                    ->disabled(fn (callable $get) => !$get('region_id'))
-                                    ->columnSpan(['default' => 3, 'md' => 1])
-                                    ->disabled(function ($livewire) {
-                                        // Permitir edición en la creación
-                                        if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
-                                            return false;
-                                        }
-                                
-                                        // En la edición, restringir según roles
-                                        if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
-                                            return !auth()->user()->hasAnyRole([
-                                                'Administrador',
-                                                'Secretario Nacional',
-                                                'Tesorero Nacional',
-                                                'Secretario Regional',
-                                                
-                                            ]);
-                                        }
-                                
-                                        // Otros casos (si los hay), puedes decidir aquí
-                                        return false; // Por defecto, habilitado si no es ni creación ni edición
-                                    })
-                                    ->dehydrated(),
-
-                                Forms\Components\Select::make('sector_id')
-                                    ->label('Sector')
-                                    ->options(fn (callable $get) =>
-                                        \App\Models\Sector::where('district_id', $get('district_id'))->pluck('name', 'id'))
-                                    ->required()
-                                    ->disabled(fn (callable $get) => !$get('district_id'))
-                                    ->columnSpan(['default' => 3, 'md' => 1])
-                                    ->disabled(function ($livewire) {
-                                        // Permitir edición en la creación
-                                        if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
-                                            return false;
-                                        }
-                                
-                                        // En la edición, restringir según roles
-                                        if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
-                                            return !auth()->user()->hasAnyRole([
-                                                'Administrador',
-                                                'Secretario Nacional',
-                                                'Tesorero Nacional',
-                                                'Secretario Regional',
-                                                'Supervisor Distrital',
-                                            ]);
-                                        }
-                                
-                                        // Otros casos (si los hay), puedes decidir aquí
-                                        return false; // Por defecto, habilitado si no es ni creación ni edición
-                                    })
-                                    ->dehydrated(),
-
-                            ]),
+                                ...TerritorialFormService::getTerritorialComponents(),
+                            ])
+                            ->columns(['default' => 1, 'md' => 3]),
 
                         Forms\Components\Grid::make(3) // Dos columnas
                             ->schema([
                                 Forms\Components\Select::make('state_id')
                                     ->label('Estado')
-                                    ->relationship('state', 'name')
+                                    ->native(false)
+                                    ->options(fn () => \App\Models\State::pluck('name', 'id'))
+                                    ->searchable()
+                                    ->placeholder('Seleccione un estado...')
+                                    ->reactive()
                                     ->required()
-                                    ->reactive() // Marca el campo como reactivo
-                                    ->afterStateUpdated(fn (callable $set) => $set('city_id', null))
+                                    ->afterStateUpdated(fn ($state, Set $set) => [
+                                        $set('city_id', null),
+                                        $set('municipality_id', null),
+                                        $set('parish_id', null),
+                                    ])
                                     ->columnSpan(['default' => 3, 'md' => 1]),
 
                                 Forms\Components\Select::make('city_id')
-                                    ->label('Municipio')
-                                    ->options(function (callable $get) {
-                                        $stateId = $get('state_id'); // Obtén el estado seleccionado
-                                        if (!$stateId) {
-                                            return []; // Si no hay estado seleccionado, devuelve una lista vacía
-                                        }
-                                        return \App\Models\City::where('state_id', $stateId)->pluck('name', 'id'); // Filtra los municipios por el estado seleccionado
-                                    })
+                                    ->label('Ciudad')
+                                    ->native(false)
+                                    ->options(fn (Get $get) => \App\Models\City::where('state_id', $get('state_id'))->pluck('name', 'id'))
+                                    ->searchable()
+                                    ->placeholder('Seleccione una ciudad...')
+                                    ->reactive()
                                     ->required()
-                                    ->disabled(fn (callable $get) => !$get('state_id'))
+                                    ->disabled(fn (Get $get) => !$get('state_id'))
+                                    ->afterStateUpdated(fn ($state, Set $set) => [
+                                        $set('municipality_id', null),
+                                        $set('parish_id', null),
+                                    ])
+                                    ->columnSpan(['default' => 3, 'md' => 1]),
+
+                                Forms\Components\Select::make('municipality_id')
+                                    ->label('Municipio')
+                                    ->native(false)
+                                    ->options(fn (Get $get) => \App\Models\Municipality::where('state_id', $get('state_id'))->pluck('name', 'id'))
+                                    ->searchable()
+                                    ->placeholder('Seleccione un municipio...')
+                                    ->reactive()
+                                    ->required()
+                                    ->disabled(fn (Get $get) => !$get('city_id'))
+                                    ->afterStateUpdated(fn ($state, Set $set) => $set('parish_id', null))
+                                    ->columnSpan(['default' => 3, 'md' => 1]),
+                                
+                                Forms\Components\Select::make('parish_id')
+                                    ->label('Parroquia')
+                                    ->native(false)
+                                    ->options(fn (Get $get) => \App\Models\Parish::where('municipality_id', $get('municipality_id'))->pluck('name', 'id'))
+                                    ->searchable()
+                                    ->placeholder('Seleccione una parroquia...')
+                                    ->reactive()
+                                    ->required()
+                                    ->disabled(fn (Get $get) => !$get('municipality_id'))
                                     ->columnSpan(['default' => 3, 'md' => 1]),
 
                                 Forms\Components\Select::make('housing_type_id')
@@ -478,10 +443,12 @@ class PastorResource extends Resource
                                 ->columnSpan(['default' => 3, 'md' => 1]),
 
                             Forms\Components\Toggle::make('social_security')
-                                ->label('¿Tiene Seguro Social?'),
+                                ->label('¿Tiene Seguro Social?')
+                                ->columnSpan(['default' => 3, 'md' => 1]),
 
                             Forms\Components\Toggle::make('housing_policy')
-                                ->label('¿Tiene Política Habitacional?'),
+                                ->label('¿Tiene Política Habitacional?')
+                                ->columnSpan(['default' => 3, 'md' => 1]),
 
                         ])
                     ])
@@ -630,6 +597,18 @@ class PastorResource extends Resource
                     ->searchable()
                     ->toggleable(isToggledHiddenByDefault: true),
 
+                Tables\Columns\TextColumn::make('municipality.name')
+                    ->label('Municipio')
+                    ->sortable()
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                Tables\Columns\TextColumn::make('parish.name')
+                    ->label('Parroquia')
+                    ->sortable()
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 Tables\Columns\IconColumn::make('social_security')
                     ->label('¿Seguro Social?')
                     ->boolean()
@@ -663,39 +642,30 @@ class PastorResource extends Resource
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
+            
             ->filters([
-                Tables\Filters\SelectFilter::make('region_id')
-                    ->label('Región')
-                    ->relationship('region', 'name')
-                    ->placeholder('Todas las regiones'),
+                // Filtros personalizados
+                ...self::getUbicacionGeograficaFilters(),
 
-                Tables\Filters\SelectFilter::make('gender_id')
-                    ->label('Género')
-                    ->relationship('gender', 'name')
-                    ->placeholder('Todos los géneros'),
 
+            
+            
                 Tables\Filters\SelectFilter::make('academic_level_id')
                     ->label('Nivel Académico')
                     ->relationship('academicLevel', 'name')
                     ->placeholder('Todos los niveles académicos'),
-
-                Tables\Filters\SelectFilter::make('marital_status_id')
-                    ->label('Estado Civil')
-                    ->relationship('maritalStatus', 'name')
-                    ->placeholder('Todos los estados civiles'),
-
-                Tables\Filters\Filter::make('has_social_security')
-                    ->label('Con Seguro Social')
-                    ->query(fn (Builder $query): Builder => $query->where('social_security', true)),
-
-                Tables\Filters\Filter::make('has_housing_policy')
-                    ->label('Con Política Habitacional')
-                    ->query(fn (Builder $query): Builder => $query->where('housing_policy', true)),
-
-                Tables\Filters\Filter::make('active_ministers')
-                    ->label('Ministros Activos')
-                    ->query(fn (Builder $query): Builder => $query->where('active', true)),
-
+            
+                //Tables\Filters\Filter::make('has_social_security')
+                    //->label('Con Seguro Social')
+                    //->query(fn (Builder $query): Builder => $query->where('social_security', true)),
+            
+                //Tables\Filters\Filter::make('has_housing_policy')
+                    //->query(fn (Builder $query): Builder => $query->where('housing_policy', true)),
+            
+                //Tables\Filters\Filter::make('active_ministers')
+                    //->label('Ministros Activos')
+                    //->query(fn (Builder $query): Builder => $query->where('active', true)),
+            
                 Tables\Filters\Filter::make('start_date_ministry')
                     ->label('Inicio en el Ministerio')
                     ->form([
@@ -710,73 +680,132 @@ class PastorResource extends Resource
                             ->when($data['start_date_max'], fn (Builder $query, $date) => $query->whereDate('start_date_ministry', '<=', $date));
                     }),
             ])
+            
             ->actions([
                 ViewAction::make()
-                    ->label('Ver')
-                    ->icon('heroicon-o-eye'),
+                    ->icon('heroicon-o-eye')
+                    ->label(false)
+                    ->tooltip('Ver Registro')
+                    ->color('primary')
+                    ->size('md')
+                    ->modalHeading(fn ($record) => 'Detalles de: ' . $record->name),
 
                 EditAction::make()
-                    ->visible(fn () => auth()->user()?->hasAnyRole([
-                        'Secretario Nacional',
-                        'Secretario Regional',
-                        'Secretario Sectorial',
-                    ])),
+                    ->icon('heroicon-s-pencil-square')    
+                    ->label(false)
+                    ->tooltip('Editar Pastor')
+                    ->color('warning')
+                    ->size('md')
+                    ->visible(function ($record) {
+                        $user = auth()->user();
+                        
+                        // Si el usuario tiene alguno de los roles privilegiados, puede editar cualquier registro
+                        if ($user?->hasAnyRole([
+                            'Secretario Nacional',
+                            'Secretario Regional',
+                            'Secretario Sectorial',
+                            'Tesorero Nacional',
+                            'Tesorero Sectorial',
+                        ])) {
+                            return true;
+                        }
+                        
+                        // Si no tiene roles privilegiados, solo puede editar su propio registro
+                        // Comparamos el username del usuario autenticado con el number_cedula del pastor
+                        return $user && $record && $user->username === $record->number_cedula;
+                    }),
                     
-                Tables\Actions\Action::make('generateCarnet')
-                    ->icon('heroicon-o-identification') // Ícono tipo carnet
-                    ->modalHeading('Generar Carnet')
-                    ->modalSubheading('¿Estás seguro de que deseas generar el carnet para este pastor?')
-                    ->modalButton('Generar')
-                    ->hidden(fn () => !auth()->user()->hasAnyRole([
+                Action::make('descargarHojaDeVida')
+                    ->label(false)
+                    ->tooltip('Hoja de Vida')
+                    ->color('primary')
+                    ->size('md')
+                    ->icon('heroicon-o-document')
+                    ->action(function (Pastor $record) {
+                        $service = new HojaDeVidaService();
+                
+                        // Usar el método fillHojaDeVida(...) que sí existe
+                        $pdfPath = $service->fillHojaDeVida($record);
+                
+                        $cedula = $record->number_cedula ?? 'SIN_CEDULA';
+                        return response()->download($pdfPath, "hoja_de_vida_{$cedula}.pdf");
+                    }),
+                
+                        
+                Action::make('downloadDocuments')
+                    ->icon('heroicon-o-document-arrow-down')
+                    ->label(false)
+                    ->tooltip('Documentos del Pastor')
+                    ->color('success')
+                    ->size('md')
+                    ->modalHeading('Descargar Documentos del Pastor')
+                    ->modalSubheading('Esto generará la Hoja de Vida, Nombramiento y Licencia (ambas caras).')
+                    ->modalButton('Generar y Descargar')
+                    ->requiresConfirmation()
+                    ->action(function (Pastor $record) {
+                        $cedula = $record->number_cedula;
+
+                        // Servicios
+                        $carnetService       = app(CarnetService::class);
+                        $hojaDeVidaService   = app(HojaDeVidaService::class);
+                        $nombramientoService = app(NombramientoService::class);
+
+                        // 1. Generar documentos
+                        $carnetService->generateCarnet($record);
+                        $hojaPath  = $hojaDeVidaService->fillHojaDeVida($record);
+                        $nombrPath = $nombramientoService->fillNombramiento($record);
+
+                        // 2. Rutas físicas de los documentos
+                        $front = storage_path("app/public/carnets/{$cedula}_carnet_front.png");
+                        $back  = storage_path("app/public/carnets/{$cedula}_carnet_back.png");
+                        $hoja  = $hojaPath;
+                        $nombr = $nombrPath;
+
+                        // 3. Verificar existencia
+                        $archivosFaltantes = [];
+                        foreach ([
+                            'Carnet Frontal' => $front,
+                            'Carnet Posterior' => $back,
+                            'Hoja de Vida' => $hoja,
+                            'Nombramiento' => $nombr,
+                        ] as $nombre => $ruta) {
+                            if (!file_exists($ruta)) {
+                                $archivosFaltantes[] = "$nombre no se generó: $ruta";
+                            }
+                        }
+
+                        if (count($archivosFaltantes)) {
+                            Log::error('Faltan documentos del pastor', ['errores' => $archivosFaltantes]);
+                            throw new \Exception("No se pudieron generar todos los documentos:\n" . implode("\n", $archivosFaltantes));
+                        }
+
+                        // 4. Crear directorio de documentos si no existe
+                        Storage::disk('public')->makeDirectory('documentos');
+
+                        // 5. Crear archivo ZIP
+                        $zipName = "documentos_pastor_{$cedula}.zip";
+                        $zipPath = storage_path("app/public/documentos/{$zipName}");
+
+                        $zip = new ZipArchive();
+                        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+                            throw new \Exception("No se pudo crear el archivo ZIP en: $zipPath");
+                        }
+
+                        $zip->addFile($front, "carnet_front_{$cedula}.png");
+                        $zip->addFile($back,  "carnet_back_{$cedula}.png");
+                        $zip->addFile($hoja,  "hoja_de_vida_{$cedula}.pdf");
+                        $zip->addFile($nombr, "nombramiento_{$cedula}.pdf");
+                        $zip->close();
+
+                        // 6. Descargar archivo ZIP
+                        return response()->download($zipPath, $zipName)->deleteFileAfterSend(false);
+                    })
+                    ->visible(fn () => auth()->user()?->hasAnyRole([
                         'Obispo Presidente',
                         'Secretario Nacional',
                         'Tesorero Nacional',
                         'Administrador',
-                    ]))
-                    ->action(function (Pastor $record) {
-                        // Instancia el servicio
-                        $carnetService = app(\App\Services\CarnetService::class);
-
-                        try {
-                            $result = $carnetService->generateCarnet($record);
-
-                            if (!empty($result)) {
-                                // Crear un archivo ZIP
-                                $zipFilePath = storage_path("app/public/carnets/{$record->number_cedula}_carnets.zip");
-                                $zip = new ZipArchive();
-                
-                                if ($zip->open($zipFilePath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true) {
-                                    // Agregar los carnets al ZIP
-                                    $zip->addFile(storage_path("app/public/carnets/{$record->number_cedula}_carnet_front.png"), "carnet_front.png");
-                                    $zip->addFile(storage_path("app/public/carnets/{$record->number_cedula}_carnet_back.png"), "carnet_back.png");
-                                    $zip->close();
-                
-                                    // Generar notificación con el enlace al ZIP
-                                    Notification::make()
-                                        ->title('El carnet se generó exitosamente.')
-                                        ->body("
-                                            <p>Descarga el archivo con los carnets generados:</p>
-                                            <a href='" . Storage::url("carnets/{$record->number_cedula}_carnets.zip") . "' target='_blank'>Descargar Carnets</a>
-                                        ")
-                                        ->success()
-                                        ->send();
-                                } else {
-                                    throw new \Exception("No se pudo crear el archivo ZIP.");
-                                }
-                            } else {
-                                Notification::make()
-                                    ->title('Error al generar el carnet.')
-                                    ->danger()
-                                    ->send();
-                            }
-                        } catch (\Exception $e) {
-                            Notification::make()
-                                ->title('Hubo un error: ' . $e->getMessage())
-                                ->danger()
-                                ->send();
-                        }
-                    })
-                    ->requiresConfirmation(),
+                    ])),
 
 
 
@@ -790,8 +819,16 @@ class PastorResource extends Resource
                 'Secretario Sectorial',
             ]) ? PastorResource::getUrl('edit', ['record' => $record]) : null) // Solo los autorizados pueden abrir la edición al hacer clic
             ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                BulkActionGroup::make([
+                    DeleteBulkAction::make()
+                        ->label('Eliminar Pastores Seleccionados')
+                        ->visible(function () {
+                            $user = auth()->user();
+                            return $user?->hasAnyRole([
+                                'Administrador',
+                                'Tesorero Nacional',
+                            ]);
+                        }),
                 ]),
             ])
             //->emptyStateIcon('heroicon-o-user') // Icono para el estado vacío
@@ -802,25 +839,7 @@ class PastorResource extends Resource
             ]);
     }
 
-    protected function generateCarnet(Pastor $pastor)
-    {
-        // Instancia el servicio
-        $carnetService = app(\App\Services\CarnetService::class);
-
-        try {
-            $result = $carnetService->generateCarnet($pastor);
-
-            if (!empty($result)) {
-                Filament::notify('success', "El carnet se generó exitosamente. <br>
-                    <a href='{$result['front']}' target='_blank'>Frente del Carnet</a><br>
-                    <a href='{$result['back']}' target='_blank'>Reverso del Carnet</a>");
-            } else {
-                Filament::notify('danger', 'Error al generar el carnet.');
-            }
-        } catch (\Exception $e) {
-            Filament::notify('danger', 'Hubo un error: ' . $e->getMessage());
-        }
-    }
+    
 
 
     public static function getRelations(): array

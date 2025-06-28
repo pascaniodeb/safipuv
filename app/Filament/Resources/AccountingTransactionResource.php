@@ -13,14 +13,18 @@ use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use App\Traits\VisibleToRolesTreasurer;
+use App\Traits\HasAccountingAccess;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Filament\Forms\Components\FileUpload;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class AccountingTransactionResource extends Resource
 {
-    use VisibleToRolesTreasurer;
+    use VisibleToRolesTreasurer, HasAccountingAccess;
     
     protected static ?string $model = AccountingTransaction::class;
 
@@ -28,7 +32,7 @@ class AccountingTransactionResource extends Resource
 
     public static function getPluralModelLabel(): string
     {
-        return 'Contabilidad';
+        return 'Libro Diario';
     }
 
     public static function getNavigationGroup(): ?string
@@ -48,32 +52,21 @@ class AccountingTransactionResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        $query = parent::getEloquentQuery();
-        $user = auth()->user();
-
-        return match (true) {
-            // ✅ Tesorero Sectorial solo ve registros de su sector
-            $user->hasRole(['Tesorero Sectorial', 'Contralor Sectorial']) => $query->where('sector_id', $user->sector_id),
-
-            // ✅ Supervisor Distrital solo ve los registros que ÉL mismo ha hecho
-            $user->hasRole('Supervisor Distrital') => $query->where('user_id', $user->id),
-
-            // ✅ Tesorero Regional solo ve registros de su región
-            $user->hasRole(['Tesorero Regional', 'Contralor Regional']) => $query->where('region_id', $user->id),
-
-            // ✅ Tesorero Nacional ve todos los registros
-            $user->hasRole(['Tesorero Nacional', 'Contralor Nacional']) => $query->where('user_id', $user->id),
-
-            // ❌ Otros usuarios no ven nada
-            default => $query->whereNull('id'),
-        };
+        \Log::info("getEloquentQuery - EJECUTÁNDOSE");
+        
+        $query = parent::getEloquentQuery()->accessibleRecords();
+        
+        \Log::info("getEloquentQuery - Query aplicada, SQL: " . $query->toSql());
+        \Log::info("getEloquentQuery - Bindings: " . json_encode($query->getBindings()));
+        
+        return $query;
     }
 
-    public static function getDefaultTableQuery(): Builder
-    {
-        return parent::getEloquentQuery()
-            ->where('month', now()->format('Y-m'));
-    }
+    //public static function getDefaultTableQuery(): Builder
+    //{
+        // Usar la query con accessibleRecords, SIN filtro de mes por defecto
+        //return static::getEloquentQuery();
+    //}
 
 
     public static function form(Form $form): Form
@@ -86,17 +79,34 @@ class AccountingTransactionResource extends Resource
                         ->schema([
                             Forms\Components\DatePicker::make('transaction_date')
                                 ->label('Fecha de la Transacción')
-                                ->native(false) // Usar el calendario interactivo
-                                ->format('Y-m-d')
-                                ->minDate(now()->startOfMonth()) // ❌ No permite seleccionar fechas anteriores al inicio del mes
-                                ->maxDate(now()->endOfMonth()) // ❌ No permite seleccionar fechas futuras fuera del mes
-                                ->default(now()) // ✅ Establece la fecha por defecto como hoy
-                                ->required(),
-                            
-                            Forms\Components\Hidden::make('month')
-                                ->default(fn (callable $get) => date('Y-m', strtotime($get('transaction_date')))),
-                            
+                                ->native(false)
 
+                                // Formato de presentación y de guardado
+                                ->displayFormat('Y-m-d')
+                                ->format('Y-m-d')
+
+                                // Rango permitido **solo al crear**:
+                                // desde hace 7 meses hasta hoy
+                                ->minDate(fn (string $context) => $context === 'create'
+                                    ? \Carbon\Carbon::now()->subMonths(7)->startOfMonth()
+                                    : null
+                                )
+                                ->maxDate(fn (string $context) => $context === 'create'
+                                    ? \Carbon\Carbon::now()->endOfDay()
+                                    : null
+                                )
+
+                                // Valor por defecto: 1.º de este mes, salvo que ya exista
+                                ->default(fn (?Model $record) =>
+                                    $record?->transaction_date
+                                        ? $record->transaction_date
+                                        : \Carbon\Carbon::now()->startOfMonth()
+                                )
+
+                                ->required(),
+
+                            
+                    
                             
                             Forms\Components\Select::make('accounting_id')
                                 ->label('Contabilidad')
@@ -148,26 +158,37 @@ class AccountingTransactionResource extends Resource
                                 ->required()
                                 ->reactive(),
 
+                            
+                        ]),
+                        Forms\Components\Grid::make(2)
+                        ->schema([
                             Forms\Components\Select::make('accounting_code_id')
                                 ->label('Código Contable')
                                 ->options(function (callable $get) {
                                     $movementId = $get('movement_id');
-                                    $user = auth()->user(); // Obtener usuario autenticado
-                                    $userLevel = $user->treasury_level; // 🔹 Nivel de contabilidad para Tesoreros
+                                    $user = auth()->user();
+                                    $userLevel = $user->treasury_level;
+                                    
+                                    if (!$movementId) {
+                                        return [];
+                                    }
                             
-                                    return $movementId
-                                        ? \App\Models\AccountingCode::where('movement_id', $movementId)
-                                            ->whereHas('accounting', function ($query) use ($user, $userLevel) {
-                                                $query->whereHas('treasury', function ($q) use ($user, $userLevel) {
-                                                    if ($user->hasRole('Supervisor Distrital')) {
-                                                        $q->where('level', 'Distrital'); // 🔹 Excepción para el Supervisor Distrital
-                                                    } else {
-                                                        $q->where('level', $userLevel); // 🔹 Mantiene la lógica actual para Tesoreros
-                                                    }
-                                                });
-                                            })
-                                            ->pluck('code', 'id')
-                                        : [];
+                                    $codes = \App\Models\AccountingCode::where('movement_id', $movementId)
+                                        ->whereHas('accounting', function ($query) use ($user, $userLevel) {
+                                            $query->whereHas('treasury', function ($q) use ($user, $userLevel) {
+                                                if ($user->hasRole('Supervisor Distrital')) {
+                                                    $q->where('level', 'Distrital');
+                                                } else {
+                                                    $q->where('level', $userLevel);
+                                                }
+                                            });
+                                        })
+                                        ->get();
+                            
+                                    // Construimos [id => 'CODE - DESCRIPTION']
+                                    return $codes->mapWithKeys(fn($code) => [
+                                        $code->id => $code->code . ' - ' . $code->description,
+                                    ]);
                                 })
                                 ->required()
                                 ->native(false)
@@ -175,8 +196,16 @@ class AccountingTransactionResource extends Resource
                                 ->disabled(fn (callable $get) => !$get('movement_id'))
                                 ->afterStateUpdated(function ($state, callable $set) {
                                     $description = \App\Models\AccountingCode::where('id', $state)->value('description');
+                                
+                                    // 📌 Mostrar descripción legible (no se guarda)
                                     $set('accounting_code_description', $description);
+                                
+                                    // ✅ También llenar el campo que sí se guarda en BD
+                                    $set('description', $description);
                                 }),
+                                
+                                
+                            
                             
                             
                             
@@ -187,9 +216,9 @@ class AccountingTransactionResource extends Resource
                                 ->label('Descripción del Código Contable')
                                 ->disabled()
                                 ->dehydrated(false) // No se guarda en la BD
-                                ->columnSpan(2)
+                                //->columnSpan(2)
                                 ->placeholder('Seleccione un código para ver su descripción'),
-                        ]),
+                        ])
                 ]),
 
             Forms\Components\Section::make('Detalles del Movimiento')
@@ -199,6 +228,7 @@ class AccountingTransactionResource extends Resource
                         ->schema([
                             Forms\Components\Select::make('currency')
                                 ->label('Divisa')
+                                ->native(false)
                                 ->options([
                                     'VES' => 'Bolívares (VES)',
                                     'USD' => 'Dólares (USD)',
@@ -215,22 +245,29 @@ class AccountingTransactionResource extends Resource
                             
                         ]),
 
-                    Forms\Components\Textarea::make('description')
-                        ->label('Descripción')
-                        ->rows(2)
-                        ->maxLength(255),
+                    Forms\Components\TextInput::make('description')
+                        ->label('Descripción'),
+                    
                 ]),
 
             Forms\Components\Section::make('Evidencia del Movimiento')
                 ->description('Suba una imagen del recibo o factura del movimiento contable.')
                 ->schema([
-                    Forms\Components\FileUpload::make('receipt_path')
+                    FileUpload::make('receipt_path')
                         ->label('Subir Recibo o Factura')
                         ->image()
-                        ->directory('receipts') // Carpeta donde se guardarán los archivos
-                        ->preserveFilenames()
-                        ->maxSize(2048), // 2MB máximo
+                        ->imagePreviewHeight('200')
+                        ->downloadable() // Permite descargar la imagen
+                        ->openable()     // ¡Agrega esta línea! Permite abrir la imagen en una nueva pestaña/ventana
+                        ->directory('receipts')
+                        //->preserveFilenames()
+                        ->maxSize(2048),
+
+
+
+
                 ]),
+
         ]);
     }
 
@@ -274,34 +311,44 @@ class AccountingTransactionResource extends Resource
                     ->label('Descripción')
                     ->searchable(),
 
-                Tables\Columns\TextColumn::make('month')
+                Tables\Columns\TextColumn::make('transaction_date')
                     ->label('Mes')
+                    ->formatStateUsing(function ($state) {
+                        if (!$state) {
+                            return '-';
+                        }
+                
+                        // Asumiendo que $state viene como "2025-01-01"
+                        // Lo parseamos con Carbon y mostramos "01/2025"
+                        return \Carbon\Carbon::parse($state)->format('m/Y');
+                    })
                     ->badge()
                     ->color('gray')
                     ->sortable(),
-                
-                Tables\Columns\BadgeColumn::make('month')
-                    ->label('Estado del Mes')
+    
+                Tables\Columns\BadgeColumn::make('is_closed')
+                    ->label('Estado')
+                    ->formatStateUsing(fn (bool $state) => $state ? 'Cerrado' : 'Abierto')
                     ->colors([
-                        'yellow' => fn ($record) => $record->month < now()->format('Y-m'),
-                        'green' => fn ($record) => $record->month == now()->format('Y-m'),
-                    ])
-                    ->formatStateUsing(fn ($record) => 
-                        $record->month < now()->format('Y-m') ? 'Cerrado' : 'Abierto'
-                    ),
+                        'danger' => true, // Si el estado (is_closed) es true, el color será 'danger'
+                        'success' => false, // Si el estado (is_closed) es false, el color será 'success'
+                    ]),
+                
+                
                 
 
                 Tables\Columns\IconColumn::make('receipt_path')
                     ->label('Factura/Recibo')
                     ->icon(fn ($record) => $record->receipt_path ? 'heroicon-o-document' : 'heroicon-o-x-circle')
                     ->color(fn ($record) => $record->receipt_path ? 'success' : 'danger')
-                    ->url(fn ($record) => $record->receipt_path ? asset('storage/' . $record->receipt_path) : null, true),
+                    ->url(fn ($record) => $record->receipt_path ? asset('storage/' . $record->receipt_path) : null, true)
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Fecha de Registro')
                     ->dateTime('d-m-Y H:i')
                     ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: false),
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 Tables\Columns\TextColumn::make('updated_at')
                     ->label('Última Modificación')
@@ -311,27 +358,77 @@ class AccountingTransactionResource extends Resource
 
             ])
             ->filters([
-                // Filtro por mes
-                Tables\Filters\SelectFilter::make('month')
-                    ->label('Filtrar por Mes')
-                    ->options(
-                        AccountingTransaction::select('month')
-                            ->distinct()
-                            ->orderByDesc('month')
-                            ->pluck('month', 'month')
-                    ),
+                // Filtro por mes mejorado
+                Tables\Filters\SelectFilter::make('month_filter')
+                    ->label('Mes contable')
+                    ->options(function () {
+                        $pdfService = app(\App\Services\AccountingPDFService::class);
+                        return $pdfService->getMonthOptions();
+                    })
+                    ->query(function ($query, array $data) {
+                        if (!empty($data['value'])) {
+                            $month = $data['value'];
+                            $startOfMonth = \Carbon\Carbon::createFromFormat('Y-m', $month)->startOfMonth();
+                            $endOfMonth = \Carbon\Carbon::createFromFormat('Y-m', $month)->endOfMonth();
+                            
+                            $query->whereBetween('transaction_date', [$startOfMonth, $endOfMonth]);
+                        }
+                    })
+                    ->default(function () {
+                        $pdfService = app(\App\Services\AccountingPDFService::class);
+                        $months = $pdfService->getMonthOptions();
+                        return array_key_first($months);
+                    })
+                    ->native(false),
+                
+
+
+                
             
                 // Filtro por tipo de movimiento (Ingreso/Egreso)
                 Tables\Filters\SelectFilter::make('movement_id')
                     ->label('Filtrar por Tipo de Movimiento')
+                    ->native(false)
                     ->options(
                         Movement::pluck('type', 'id') // Obtiene los tipos de movimiento desde la base de datos
                     ),
             ])
+            ->modifyQueryUsing(function (Builder $query): Builder {
+                \Log::info("modifyQueryUsing - EJECUTÁNDOSE");
+                
+                // Aplicar el scope aquí también como backup
+                $user = auth()->user();
+                if ($user) {
+                    // Crear instancia temporal para usar el trait
+                    $tempInstance = new class {
+                        use \App\Traits\HasAccountingAccess;
+                    };
+                    
+                    $accounting = $tempInstance->getUserAccounting();
+                    if ($accounting) {
+                        $query->where('accounting_id', $accounting->id);
+                        
+                        if ($user->hasAnyRole(['Tesorero Sectorial', 'Contralor Sectorial']) && $user->sector_id) {
+                            $query->where('sector_id', $user->sector_id);
+                            \Log::info("modifyQueryUsing - Aplicando filtro sectorial: " . $user->sector_id);
+                        } elseif ($user->hasRole('Supervisor Distrital') && $user->district_id) {
+                            $query->where('district_id', $user->district_id);
+                            \Log::info("modifyQueryUsing - Aplicando filtro distrital: " . $user->district_id);
+                        } elseif ($user->hasAnyRole(['Tesorero Regional', 'Contralor Regional']) && $user->region_id) {
+                            $query->where('region_id', $user->region_id);
+                            \Log::info("modifyQueryUsing - Aplicando filtro regional: " . $user->region_id);
+                        }
+                    }
+                }
+                
+                \Log::info("modifyQueryUsing - Query final: " . $query->toSql());
+                return $query;
+            })
             
             ->actions([
                 Tables\Actions\EditAction::make()
-                    ->disabled(fn ($record) => $record->month <= now()->subMonth()->format('Y-m')),
+                    ->visible(fn ($record) => ! $record->is_closed),
+                Tables\Actions\ViewAction::make(),
 
             ])
             ->bulkActions([
@@ -347,6 +444,14 @@ class AccountingTransactionResource extends Resource
             //
         ];
     }
+
+    public static function getWidgets(): array
+    {
+        return [
+            \App\Filament\Resources\AccountingTransactionResource\Widgets\AccountingTransactionStats::class,
+        ];
+    }
+
 
     public static function getPages(): array
     {

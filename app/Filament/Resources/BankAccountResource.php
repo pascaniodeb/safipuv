@@ -87,6 +87,7 @@ class BankAccountResource extends Resource
                         Forms\Components\Select::make('bank_account_type_id')
                             ->label('Tipo de Cuenta')
                             ->relationship('accountType', 'name')
+                            ->native(false)
                             ->required()
                             ->reactive()
                             ->default(fn () => \App\Models\BankAccountType::first()?->id),
@@ -207,12 +208,15 @@ class BankAccountResource extends Resource
                             ->label('Seleccione un Banco')
                             ->placeholder('Seleccione...')
                             ->relationship('bank', 'name')
+                            ->native(false)
+                            ->searchable()
                             ->required(),
                         
                         Forms\Components\Select::make('bank_transaction_id')
                             ->label('Tipo de Transacción')
                             ->placeholder('Seleccione...')
                             ->relationship('transaction', 'name')
+                            ->native(false)
                             ->required()
                             ->reactive()
                             ->afterStateUpdated(fn ($state, callable $set) => self::handleTransactionSelection($state, $set)),

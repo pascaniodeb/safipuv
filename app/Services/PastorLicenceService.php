@@ -8,62 +8,74 @@ use Illuminate\Support\Facades\Auth;
 class PastorLicenceService
 {
     /**
-     * Determina la licencia pastoral basada en las reglas establecidas.
-     *
-     * @param  int|null  $pastorIncomeId
-     * @param  int|null  $pastorTypeId
-     * @param  string|null  $startDate
-     * @return int|null
+     * Determina la licencia pastoral basándose únicamente en:
+     *  - Tipo de pastor ($pastorTypeId)
+     *  - Días de ministerio (derivados de $startDateMinistry)
      */
-    public static function determineLicence(?int $pastorIncomeId, ?int $pastorTypeId, ?string $startDate): ?int
+    public static function calculateLicence(?int $pastorTypeId, ?string $startDateMinistry): ?int
     {
-        // 📌 1️⃣ Si el usuario tiene permiso, puede asignar manualmente
-        if (Auth::user()?->hasAnyRole(['Administrador', 'Secretario Nacional'])) {
-            return request('pastor_licence_id') ?: self::calculateLicence($pastorIncomeId, $pastorTypeId, $startDate);
+        if (! $startDateMinistry) {
+            return null; 
         }
 
-        // 📌 2️⃣ Aplicar reglas de negocio para calcular automáticamente la licencia
-        return self::calculateLicence($pastorIncomeId, $pastorTypeId, $startDate);
+        // Si no hay fecha o no es válida, retornar null
+        if (! $startDateMinistry || ! strtotime($startDateMinistry)) {
+            return null;
+        }
+
+        // Calcular días transcurridos
+        $daysInMinistry = Carbon::parse($startDateMinistry)
+            ->startOfDay()
+            ->diffInDays(now()->startOfDay());
+
+        switch ($pastorTypeId) {
+            // (4) Pastora Titular => siempre licencia NACIONAL
+            case 4:
+                return 2; // NACIONAL
+
+            // (3) Asistente => inicia con LOCAL (si < 1000 días),
+            //                   después (>= 1000) pasa a NACIONAL y ahí se queda
+            case 3:
+                return $daysInMinistry < 1000
+                    ? 1 // LOCAL
+                    : 2; // NACIONAL
+
+            // (2) Adjunto => comienza con NACIONAL, y tras 1000 días pasa a ORDENACIÓN
+            case 2:
+                return $daysInMinistry < 1000
+                    ? 2 // NACIONAL
+                    : 3; // ORDENACIÓN
+
+            // (1) Titular => va por los 3 escalones:
+            //   - < 1000 => LOCAL
+            //   - [1000..2100] => NACIONAL
+            //   - > 2100 => ORDENACIÓN
+            case 1:
+                if ($daysInMinistry < 1000) {
+                    return 1; // LOCAL
+                } elseif ($daysInMinistry < 2101) {
+                    return 2; // NACIONAL
+                } else {
+                    return 3; // ORDENACIÓN
+                }
+
+            // Cualquier otro tipo (o nulo) => sin licencia
+            default:
+                return null;
+        }
     }
 
-    /**
-     * Calcula la licencia basada en los días en el ministerio y las reglas de tipo de pastor.
-     *
-     * @param  int|null  $pastorIncomeId
-     * @param  int|null  $pastorTypeId
-     * @param  string|null  $startDate
-     * @return int|null
-     */
-    private static function calculateLicence(?int $pastorIncomeId, ?int $pastorTypeId, ?string $startDate): ?int
+    public static function determineLicence(?int $pastorTypeId, ?string $startDate): ?int
     {
-        if (!$startDate || !strtotime($startDate)) {
-            return null; // Si no hay fecha, no asigna licencia
+        // Si el usuario actual PUEDE asignar manualmente y el request trae un pastor_licence_id,
+        // entonces devolvemos lo que el usuario seleccionó. Sino, calculamos automáticamente.
+        if (auth()->user()->hasAnyRole(['Administrador','Secretario Nacional'])) {
+            return request('pastor_licence_id') 
+                ?: \App\Services\PastorLicenceService::calculateLicence($pastorTypeId, $startDate);
         }
 
-        $startDate = Carbon::parse($startDate)->startOfDay();
-        $daysInMinistry = $startDate->diffInDays(now()->startOfDay());
-
-        // 📌 Casos especiales
-        if ($pastorIncomeId === 3 && $pastorTypeId === 4) {
-            return 2; // Viuda - Pastora Titular siempre tiene NACIONAL (ID: 2)
-        }
-
-        if ($pastorIncomeId === 2 && in_array($pastorTypeId, [1, 2])) {
-            // Titular o Adjunto con Código 141 → Comienza en NACIONAL
-            return $daysInMinistry > 2100 ? 3 : 2;
-        }
-
-        if ($pastorIncomeId === 1 && $pastorTypeId === 3) {
-            // Asistente (Regular) → Solo hasta NACIONAL
-            return $daysInMinistry > 1005 ? 2 : 1;
-        }
-
-        // 📌 Regla General: Basado en fecha de inicio del ministerio
-        return match (true) {
-            $daysInMinistry <= 1005 => 1, // LOCAL
-            $daysInMinistry > 1005 && $daysInMinistry <= 2100 => 2, // NACIONAL
-            $daysInMinistry > 2100 => 3, // ORDENACIÓN
-            default => null
-        };
+        // Para roles sin permiso, siempre calculamos.
+        return \App\Services\PastorLicenceService::calculateLicence($pastorTypeId, $startDate);
     }
+
 }

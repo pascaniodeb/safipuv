@@ -5,10 +5,16 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\TreasuryAllocationResource\Pages;
 use App\Filament\Resources\TreasuryAllocationResource\RelationManagers;
 use App\Models\TreasuryAllocation;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
+use App\Models\Treasury;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\Filter;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use App\Traits\VisibleToRolesTreasurer;
+use App\Traits\FiltersSectorsTrait;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -16,7 +22,7 @@ use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class TreasuryAllocationResource extends Resource
 {
-    use VisibleToRolesTreasurer;
+    use VisibleToRolesTreasurer, FiltersSectorsTrait;
     
     protected static ?string $model = TreasuryAllocation::class;
 
@@ -29,7 +35,7 @@ class TreasuryAllocationResource extends Resource
 
     public static function canEdit($record): bool
     {
-        return false; // Oculta el botón de "Editar"
+        return auth()->user()->hasRole('Tesorero Sectorial');
     }
 
 
@@ -75,7 +81,8 @@ class TreasuryAllocationResource extends Resource
             ->whereHas('treasury', function ($q) {
                 $q->whereIn('name', ['sectorial', 'distrital', 'regional', 'nacional']);
             }) // 🔹 Filtra no solo el sectorial, sino también distrital, regional y nacional
-            ->groupBy('treasury_id', 'offering_category_id', 'month'),
+            ->groupBy('treasury_id', 'offering_category_id', 'month')
+            ->orderByRaw('MIN(id) ASC'),
 
 
             // SUPERVISOR DISTRITAL: Solo ve registros de su distrito
@@ -94,7 +101,8 @@ class TreasuryAllocationResource extends Resource
                 ->whereHas('treasury', function ($q) {
                     $q->where('name', 'distrital');
                 })
-                ->groupBy('treasury_id', 'offering_category_id', 'month'),
+                ->groupBy('treasury_id', 'offering_category_id', 'month')
+                ->orderByRaw('MIN(id) ASC'),
 
             // TESORERO REGIONAL: Solo ve registros de su región
             $user->hasRole(['Superintendente Regional', 'Tesorero Regional', 'Contralor Regional']) => $query
@@ -112,7 +120,10 @@ class TreasuryAllocationResource extends Resource
                 ->whereHas('treasury', function ($q) {
                     $q->where('name', 'regional');
                 })
-                ->groupBy('treasury_id', 'offering_category_id', 'month'),
+                ->groupBy('treasury_id', 'offering_category_id', 'month')
+                ->orderByRaw('MIN(id) ASC'),
+
+
 
             // TESORERO NACIONAL: Ve todas las transacciones
             $user->hasRole(['Tesorero Nacional', 'Contralor Nacional']) => $query
@@ -124,18 +135,14 @@ class TreasuryAllocationResource extends Resource
                     SUM(amount) AS amount,
                     ROUND(AVG(percentage), 2) AS percentage
                 ")
-                ->groupBy('treasury_id', 'offering_category_id', 'month'),
+                ->groupBy('treasury_id', 'offering_category_id', 'month')
+                ->orderByRaw('MIN(id) ASC'),
 
             // Para otros usuarios, no mostrar registros
             default => $query->whereNull('id'),
         };
     }
 
-
-
-
-
-    
     public static function form(Form $form): Form
     {
         return $form->schema([
@@ -184,6 +191,10 @@ class TreasuryAllocationResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            //->query(
+                //static::getEloquentQuery()
+                    //->with(['treasury', 'offeringCategory'])
+            //)
             ->columns([
                 Tables\Columns\TextColumn::make('month')
                     ->label('Mes')
@@ -200,24 +211,40 @@ class TreasuryAllocationResource extends Resource
                     ->searchable(),
 
                 Tables\Columns\TextColumn::make('amount')
-                    ->label('Monto Asignado')
+                    ->label('Monto Bs.')
                     ->money('VES')
                     ->sortable(),
+                    
+                Tables\Columns\TextColumn::make('amount_usd_by_user_level')
+                    ->label('Monto USD')
+                    ->state(fn (TreasuryAllocation $record) =>
+                        ($monto = $record->getMontoDistribuidoEn('USD', auth()->user()))
+                            ? '$' . number_format($monto, 2, '.', ',')
+                            : '—'
+                    ),
 
+                Tables\Columns\TextColumn::make('amount_cop_by_user_level')
+                    ->label('Monto COP')
+                    ->state(fn (TreasuryAllocation $record) =>
+                        ($monto = $record->getMontoDistribuidoEn('COP', auth()->user()))
+                            ? number_format($monto, 2, '.', ',') . ' COP'
+                            : '—'
+                    ),
+
+
+                
                 Tables\Columns\TextColumn::make('percentage')
                     ->label('Porcentaje')
                     ->suffix('%')
                     ->sortable()
-                    ->visible(fn () => auth()->user()->hasRole('Tesorero Nacional')),
-                
+                    ->visible(fn () => auth()->user()->hasRole('Administrador')),
 
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Fecha de Asignación')
-                    ->date('d/m/Y H:i') // Formato de fecha y hora
+                    ->date('d/m/Y H:i')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
-                
-                
+
                 Tables\Columns\TextColumn::make('updated_at')
                     ->label('Fecha de Actualización')  
                     ->dateTime()
@@ -225,50 +252,66 @@ class TreasuryAllocationResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                // 🔹 Filtro por Mes (month)
-                Tables\Filters\SelectFilter::make('month')
-                ->label('Mes')
-                ->options(
-                    TreasuryAllocation::select('month')
-                        ->distinct()
-                        ->orderBy('month', 'desc')
-                        ->pluck('month', 'month')
-                        ->toArray()
-                )
-                ->searchable(),
+                // Filtro por Mes
+                SelectFilter::make('month')
+                    ->label('Mes')
+                    ->options(
+                        TreasuryAllocation::select('month')
+                            ->distinct()
+                            ->orderByDesc('month')
+                            ->pluck('month')
+                            ->mapWithKeys(fn ($mes) => [
+                                $mes => Carbon::parse($mes . '-01')->translatedFormat('F/Y'),
+                            ])
+                            ->toArray()
+                    )
+                    ->default(
+                        TreasuryAllocation::orderByDesc('month')->value('month')
+                    )
+                    ->searchable(),
+    
+                // Filtro por Tesorería
+                SelectFilter::make('treasury_id')
+                    ->label('Tesorería')
+                    ->visible(fn () => !Auth::user()?->hasRole('Supervisor Distrital'))
+                    ->options(function () {
+                        $user = Auth::user();
+                        $tesoreria = Treasury::where('level', $user->treasury_level ?? null)->first();
 
-                // 🔹 Filtro por Tesorería (treasury_id)
-                Tables\Filters\SelectFilter::make('treasury_id')
-                ->label('Tesorería')
-                ->relationship('treasury', 'name')
-                ->searchable(),
+                        if (! $tesoreria) {
+                            return [null => 'TODOS'];
+                        }
 
-                // 🔹 Filtro por Categoría de Ofrenda (offering_category_id)
-                Tables\Filters\SelectFilter::make('offering_category_id')
-                ->label('Categoría de Ofrenda')
-                ->relationship('offeringCategory', 'name')
-                ->searchable(),
+                        return [
+                            null => 'TODOS',
+                            $tesoreria->id => $tesoreria->name ?: 'Tesorería sin nombre',
+                        ];
+                    })
+                    ->default(function () {
+                        $user = Auth::user();
+                        return Treasury::where('level', $user->treasury_level ?? null)->first()?->id;
+                    })
+                    ->searchable(),
 
-                // 🔹 Filtro por Rango de Monto (amount)
-                Tables\Filters\Filter::make('amount_range')
-                ->form([
-                    Forms\Components\TextInput::make('min_amount')
-                        ->label('Monto mínimo')
-                        ->numeric(),
-                    Forms\Components\TextInput::make('max_amount')
-                        ->label('Monto máximo')
-                        ->numeric(),
-                ])
-                ->query(function (Builder $query, array $data) {
-                    return $query
-                        ->when(isset($data['min_amount']), fn ($q) => $q->where('amount', '>=', $data['min_amount']))
-                        ->when(isset($data['max_amount']), fn ($q) => $q->where('amount', '<=', $data['max_amount']));
-                }),
+    
+                // 🔹 Filtro por Sector (solo para roles altos)
+                SelectFilter::make('sector_id')
+                    ->label('Sector')
+                    ->visible(fn () => Auth::user()?->hasAnyRole(['Administrador', 'Tesorero Nacional']))
+                    ->options(static::getSectorsForCurrentUserStatic())
+                    ->searchable()
+                    ->query(function (Builder $query, array $data) {
+                        if (! isset($data['value']) || ! $data['value']) {
+                            return $query;
+                        }
 
-                
-
-
+                        return $query->whereHas('offeringReport.pastor', function ($subQuery) use ($data) {
+                            $subQuery->where('sector_id', $data['value']);
+                        });
+                    }),
             ])
+            ->persistFiltersInSession() // Persistir filtros en la sesión
+            
             ->actions([
                 Tables\Actions\EditAction::make(),
             ])

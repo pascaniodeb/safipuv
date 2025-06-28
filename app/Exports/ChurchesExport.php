@@ -22,7 +22,9 @@ class ChurchesExport implements FromCollection, WithHeadings, WithMapping
      */
     public function collection()
     {
-        $query = Church::with(['region', 'district', 'sector', 'state', 'city', 'categoryChurch']);
+        $query = Church::with([
+            'region', 'district', 'sector', 'state', 'city', 'categoryChurch', 'currentPastor'
+        ]);
 
         // 🔹 Si el usuario tiene rol nacional, puede ver todas las iglesias.
         if ($this->user->hasAnyRole([
@@ -61,7 +63,12 @@ class ChurchesExport implements FromCollection, WithHeadings, WithMapping
     public function headings(): array
     {
         return [
-            "ID", "Nombre", "Código", "Fecha de Apertura", "Pastor Fundador",
+            "ID",
+            "Nombre",
+            "Código",
+            "Fecha de Apertura",
+            "Pastor Fundador",
+            "Pastor Asignado",
             "Región", "Distrito", "Sector", "Estado", "Ciudad", "Dirección",
             "Pastor Actual", "Cédula Pastor", "Posición Actual",
             "Número de Adultos", "Número de Niños", "Bautizados",
@@ -83,6 +90,7 @@ class ChurchesExport implements FromCollection, WithHeadings, WithMapping
             $church->code_church,
             $church->date_opening ?? "No especificado",
             $church->pastor_founding ?? "No especificado",
+            optional($church->currentPastor)->name ?? 'No asignado',
             optional($church->region)->name ?? "No especificado",
             optional($church->district)->name ?? "No especificado",
             optional($church->sector)->name ?? "No especificado",

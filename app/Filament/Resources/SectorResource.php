@@ -4,6 +4,8 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\SectorResource\Pages;
 use App\Filament\Resources\SectorResource\RelationManagers;
+use App\Models\District;
+use App\Models\Region;
 use App\Models\Sector;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -46,54 +48,56 @@ class SectorResource extends Resource
     {
         return $form
             ->schema([
-                Forms\Components\Select::make('region_id')
+                // 🔹 Región (solo para filtrar)
+                Forms\Components\Select::make('region_filter')
                     ->label('Región')
-                    ->relationship('region', 'name') // Relación con el modelo Region
-                    ->preload() // Pre-carga las opciones
-                    ->required()
-                    ->live(), // Hace que el campo sea reactivo al cambio
-
-                Forms\Components\Select::make('district_id')
-                    ->label('Distrito')
-                    ->options(function (callable $get) {
-                        $regionId = $get('region_id'); // Obtiene el valor seleccionado en región
-                        if ($regionId) {
-                            return \App\Models\District::where('region_id', $regionId)
-                                ->pluck('name', 'id'); // Filtra distritos según la región seleccionada
-                        }
-                        return [];
-                    })
-                    ->searchable() // Permite buscar dentro de las opciones
-                    ->reactive() // Actualiza las opciones dinámicamente
-                    ->required()
-                    ->disabled(fn (callable $get) => !$get('region_id')) // Desactiva el select si no hay región seleccionada
-                    ->placeholder('Seleccione una región primero'), // Mensaje de ayuda
-
-                Forms\Components\TextInput::make('name')
-                    ->label('Nombre del sector')
-                    ->maxLength(100)
+                    ->native(false)
+                    ->placeholder('Seleccione una región')
+                    ->options(Region::pluck('name', 'id'))
+                    ->reactive()
+                    ->afterStateUpdated(fn ($state, callable $set) => $set('district_id', null))
+                    ->live()
+                    ->helperText('Seleccione una región para filtrar los distritos.')
                     ->required(),
 
+                // 🔹 Distrito (es el que realmente se guarda)
+                Forms\Components\Select::make('district_id')
+                    ->label('Distrito')
+                    ->options(fn (callable $get) =>
+                        !empty($get('region_filter'))
+                            ? District::where('region_id', $get('region_filter'))->pluck('name', 'id')
+                            : []
+                    )
+                    ->searchable()
+                    ->required()
+                    ->reactive()
+                    ->disabled(fn (callable $get) => !$get('region_filter'))
+                    ->placeholder('Seleccione una región primero'),
+
+                // 🔹 Nombre del sector
+                Forms\Components\TextInput::make('name')
+                    ->label('Nombre del sector')
+                    ->required()
+                    ->maxLength(100),
+
+                // 🔹 Número
                 Forms\Components\TextInput::make('number')
                     ->label('Número')
                     ->numeric()
                     ->required(),
 
+                // 🔹 Activo
                 Forms\Components\Toggle::make('active')
                     ->label('Activo')
-                    ->default(true)
-                    ->required(),
-                ]);
+                    ->default(true),
+            ]);
     }
 
     public static function table(Table $table): Table
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('row_number') // Numerador de filas
-                    ->label('Nro') // Etiqueta de la columna
-                    ->rowIndex() // Activa el índice de la fila
-                    ->sortable(), // Opcional: Permite ordenar
+                
                 Tables\Columns\TextColumn::make('district.region.name')
                     ->label('Región') // Muestra el nombre de la región
                     ->sortable()
@@ -106,6 +110,7 @@ class SectorResource extends Resource
 
                 Tables\Columns\TextColumn::make('name')
                     ->label('Sector') // Nombre del sector
+                    ->sortable()
                     ->searchable(),
 
                 Tables\Columns\TextColumn::make('number')

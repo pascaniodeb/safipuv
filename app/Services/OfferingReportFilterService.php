@@ -40,14 +40,15 @@ class OfferingReportFilterService
             });
         }
 
-        // 📌 Si el usuario es un Pastor, solo ve sus propios registros
-        if ($user->hasRole('Pastor')) {
+        // 📌 Si el usuario es un Pastor o Directivo Nacional, solo ve sus propios registros
+        if ($user->hasAnyRole(['Pastor', 'Directivo Nacional'])) {
             return $query->whereHas('pastor', function ($q) use ($user) {
                 $q->whereHas('user', function ($u) use ($user) {
                     $u->where('id', $user->id);
                 });
             });
         }
+
         
 
         // 📌 Si el usuario no tiene roles adecuados, no ve nada

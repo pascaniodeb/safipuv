@@ -7,13 +7,18 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "barryvdh/laravel-dompdf": "^3.1",
         "filament/filament": "^3.2",
+        "filament/notifications": "^3.2",
         "intervention/image": "^3.10",
         "laravel-lang/lang": "^15.11",
         "laravel/framework": "^11.31",
         "laravel/tinker": "^2.9",
         "maatwebsite/excel": "^3.1",
+        "phpoffice/phpspreadsheet": "^1.29",
         "rmsramos/activitylog": "^1.0",
+        "setasign/fpdf": "^1.8",
+        "setasign/fpdi": "^2.6",
         "simplesoftwareio/simple-qrcode": "^4.2",
         "spatie/image": "^3.7",
         "spatie/laravel-permission": "^6.10"

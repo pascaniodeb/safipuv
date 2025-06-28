@@ -11,6 +11,7 @@ class CreateAccountingTransaction extends CreateRecord
 {
     protected static string $resource = AccountingTransactionResource::class;
 
+
     protected function getRedirectUrl(): string
     {
         // Redirigir al índice del recurso

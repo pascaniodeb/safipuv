@@ -9,10 +9,12 @@ use App\Services\AccessControlService;
 use App\Traits\PastorAccessTrait;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
 
 class Church extends Model
 {
-    use HasFactory, LogsActivity, PastorAccessTrait;
+    use SoftDeletes, HasFactory, LogsActivity, PastorAccessTrait;
 
     /**
      * La tabla asociada con el modelo.
@@ -40,6 +42,8 @@ class Church extends Model
         'sector_id',
         'state_id',
         'city_id',
+        'municipality_id',
+        'parish_id',
         'address',
         'pastor_current',
         'number_cedula',
@@ -148,6 +152,18 @@ class Church extends Model
         return $this->belongsTo(City::class);
     }
 
+    // Relación con Municipio
+    public function municipality()
+    {
+        return $this->belongsTo(Municipality::class);
+    }
+
+    // Relación con Parroquia
+    public function parish()
+    {
+        return $this->belongsTo(Parish::class);
+    }
+    
     // Relación con Posición Actual
     public function currentPosition()
     {
@@ -170,6 +186,20 @@ class Church extends Model
         return $this->hasMany(PastorMinistry::class, 'church_id', 'id');
     }
 
+    // En App\Models\Church.php
+    public function pastor()
+    {
+        return $this->hasOne(\App\Models\PastorMinistry::class, 'church_id')
+            ->where('active', true);
+    }
+
+    public function category()
+    {
+        return $this->belongsTo(\App\Models\ChurchCategory::class, 'category_church_id');
+    }
+
+
+
     public function titularPastor()
     {
         return $this->hasOne(PastorMinistry::class)
@@ -186,6 +216,20 @@ class Church extends Model
     {
         return $this->ministries()->where('pastor_type_id', 3)->latest()->take(2)->get();
     }
+
+    public function currentPastor()
+    {
+        return $this->hasOne(Pastor::class, 'church_id');
+    }
+
+    public function offeringReports()
+    {
+        return $this->hasMany(\App\Models\OfferingReport::class);
+    }
+    
+
+
+
 
     
 

@@ -12,7 +12,9 @@ use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
 use App\Filament\Widgets\GreetingWidget;
+use App\Filament\Widgets\ExchangeRateWidget;
 use Rmsramos\Activitylog\ActivitylogPlugin;
+use App\Filament\Resources\ActivitylogResource;
 use Illuminate\Support\Facades\Auth;
 use Filament\Widgets;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -44,7 +46,8 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
             ->widgets([
-                GreetingWidget::class,
+                //GreetingWidget::class,
+                //changeRateWidget::class,
                 //Widgets\AccountWidget::class,
                 //Widgets\FilamentInfoWidget::class,
             ])
@@ -63,6 +66,7 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ])
+            ->databaseNotifications()
             ->plugins([
                 ActivitylogPlugin::make()
                     ->label('Log')

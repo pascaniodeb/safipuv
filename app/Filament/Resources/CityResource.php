@@ -22,7 +22,7 @@ class CityResource extends Resource
 
     public static function getPluralModelLabel(): string
     {
-        return 'Municipios';
+        return 'Ciudades';
     }
 
     protected static ?string $navigationIcon = 'heroicon-o-building-library';

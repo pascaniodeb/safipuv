@@ -5,6 +5,8 @@ namespace App\Filament\Resources\PastorResource\RelationManagers;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\RelationManagers\RelationManager;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -27,7 +29,13 @@ class FamilyRelationManager extends RelationManager
             ->schema([
                 Forms\Components\Section::make('Información Básica')
                     ->schema([
-
+                        Forms\Components\FileUpload::make('photo_spouse')
+                            ->label('Foto del Cónyuge')
+                            ->image()
+                            ->imageEditor()
+                            ->directory('spouses')
+                            ->columnSpanFull(),
+                        
                         Forms\Components\TextInput::make('name')
                             ->label('Nombre')
                             ->required()
@@ -48,16 +56,66 @@ class FamilyRelationManager extends RelationManager
 
                         Forms\Components\TextInput::make('number_cedula')
                             ->label('Cédula de Identidad')
-                            ->required()
+                            //->required()
                             ->maxLength(255)
-                            ->unique(),
-
+                            ->rules([
+                                fn ($record) => Rule::unique('families', 'number_cedula')->ignore($record?->id),
+                            ]),
+                        
                         Forms\Components\TextInput::make('email')
                             ->label('Correo Electrónico')
                             ->email()
-                            ->required()
+                            //->required()
                             ->maxLength(255)
-                            ->unique(),
+                            ->rules([
+                                fn ($record) => Rule::unique('families', 'email')->ignore($record?->id),
+                            ]),
+
+                        Forms\Components\Select::make('position_type_id')
+                            ->label('Tipo de Cargo')
+                            ->relationship('positionType', 'name')
+                            ->required()
+                            ->reactive()
+                            ->native(false)
+                            ->afterStateUpdated(function ($state, callable $set) {
+                                if ($state == 5) {
+                                    $set('current_position_id', null);
+                                    $set('disable_current_position', true);
+                                } else {
+                                    $set('disable_current_position', false);
+                                }
+                            })
+                            //->disabled(function () {
+                                //return !Auth::user()->hasAnyRole([
+                                    //'Administrador',
+                                    //'Secretario Nacional',
+                                    //'Tesorero Nacional',
+                                    //'Secretario Regional',
+                                    //'Secretario Sectorial',
+                                    //'Pastor',
+                                //]);
+                            //})
+                            ->dehydrated(),
+                        
+                        Forms\Components\Select::make('current_position_id')
+                            ->label('Cargo Actual')
+                            ->searchable()
+                            ->options(function (callable $get) {
+                                $positionTypeId = $get('position_type_id');
+                                if ($positionTypeId && $positionTypeId != 5) {
+                                    return \App\Models\CurrentPosition::where('position_type_id', $positionTypeId)
+                                        ->where('gender_id', 2)
+                                        ->pluck('name', 'id');
+                                }
+                                return [];
+                            })
+                            ->placeholder('Selecciona una posición')
+                            ->disabled(fn (callable $get) => $get('disable_current_position') ?? false)
+                            ->native(false)
+                            ->reactive()
+                            ->dehydrated(),
+                        
+                        
                     ])
                     ->columns(2), // Distribuye en dos columnas
 

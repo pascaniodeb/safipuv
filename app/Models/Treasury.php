@@ -24,4 +24,5 @@ class Treasury extends Model
         return $this->hasOne(Accounting::class);
     }
 
+
 }

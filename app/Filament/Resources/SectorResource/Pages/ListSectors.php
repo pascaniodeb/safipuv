@@ -14,7 +14,7 @@ class ListSectors extends ListRecords
     {
         return [
             Actions\CreateAction::make()
-                ->label('Nuevo Distrito'),
+                ->label('Nuevo Sector'),
         ];
     }
 }

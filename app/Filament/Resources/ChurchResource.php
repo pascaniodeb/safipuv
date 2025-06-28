@@ -12,20 +12,33 @@ use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
 use App\Traits\AccessControlTrait;
+use App\Traits\Filters\HasUbicacionGeograficaFilters;
+use App\Services\TerritorialFormService;
 use Filament\Resources\Resource;
+use Filament\Tables\Actions\EditAction;
+use Filament\Tables\Actions\ViewAction;
 use Filament\Tables;
+use Filament\Forms\Get;
+use Filament\Forms\Set;
 use Filament\Tables\Table;
+use Filament\Tables\Actions\DeleteBulkAction;
+use Filament\Tables\Actions\BulkActionGroup;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class ChurchResource extends Resource
 {
     use AccessControlTrait;
+    use HasUbicacionGeograficaFilters;
     
     protected static ?string $model = Church::class;
 
     protected static ?int $navigationSort = 3; // Orden
 
+    public static function getPluralModelLabel(): string
+    {
+        return 'Iglesias'; // Texto personalizado para el título principal
+    }
 
     public static function getNavigationGroup(): ?string
     {
@@ -42,13 +55,6 @@ class ChurchResource extends Resource
         return 'Modulos';
     }
 
-    public static function getPluralModelLabel(): string
-    {
-        return 'Iglesias'; // Texto personalizado para el título principal
-    }
-
-    protected static ?string $navigationIcon = 'heroicon-c-building-library';
-
     public static function getNavigationBadge(): ?string
     {
         /** @var class-string<Model> $modelClass */
@@ -56,679 +62,619 @@ class ChurchResource extends Resource
 
         return (string) $modelClass::count(); // Personaliza según sea necesario
     }
+    
+    protected static ?string $navigationIcon = 'heroicon-c-building-library';
 
+    public function view(?User $user, Pastor $pastor): bool
+    {
+        return true; // Todos los usuarios pueden ver
+    }
+
+    public function update(?User $user, Pastor $pastor): bool
+    {
+        return $user && $user->hasAnyRole([
+            'Secretario Nacional',
+            'Secretario Regional',
+            'Secretario Sectorial',
+            'Tesorero Nacional',
+            'Tesorero Sectorial',
+            'Pastor',
+        ]);
+    }
+
+    protected static function getTableRecordUrl(Model $record): ?string
+    {
+        if(auth()->user()?->can('update', $record)){
+            return static::getUrl('edit', ['record' => $record]);
+        }
+        return null;
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery(); // 🔹 Usa la consulta base correctamente
+    }
+
+    public static function canViewNotifications(): bool
+    {
+        return true; // 🔹 Habilita la visualización de notificaciones
+    }
+    
+    /*
     public static function canCreate(): bool
     {
         $user = auth()->user();
 
         return $user && $user->hasAnyRole([
+            'Administrador',
             'Secretario Nacional',
             'Secretario Regional',
             'Secretario Sectorial',
+            'Tesorero Nacional',
+            'Tesorero Regional',
+            'Tesorero Sectorial',
         ]);
-    }
+    }*/
 
-    
-    public static function form(Forms\Form $form): Forms\Form
+    /**
+     * Define the form schema for the Church resource.
+     */
+    public static function form(Form $form): Form
     {
         return $form
             ->schema([
-                Forms\Components\Wizard::make([
-                    Forms\Components\Wizard\Step::make('Datos Fundacionales')
-                        ->schema([
-                            Forms\Components\TextInput::make('name')
-                                ->label('Nombre')
-                                ->required()
-                                ->prefix('IPUV')
-                                ->maxLength(255)
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
+                Forms\Components\Group::make()
+                    ->schema([
+                        Forms\Components\Section::make('Datos de la Iglesia')
+                            ->schema(static::getDetailsFormSchema())
+                            ->columns(['md' => 2]),
 
-                            Forms\Components\DatePicker::make('date_opening')
-                                ->label('Fecha de Apertura')
-                                ->required()
-                                ->reactive() // Permite reaccionar a cambios en el estado
-                                ->afterStateUpdated(function ($state, callable $set) {
-                                    if ($state) {
-                                        // Obtener fecha y descomponerla
-                                        $month = str_pad(now()->parse($state)->format('m'), 2, '0', STR_PAD_LEFT);
-                                        $year = now()->parse($state)->format('Y');
+                        Forms\Components\Section::make('Datos de Membresía y Pastor')
+                            ->schema([
+                                Forms\Components\Group::make()
+                                    ->schema(static::getMembresiaFormSchema())
+                                    ->columns(['md' => 3]),
 
-                                        // Obtener el último código generado y calcular el siguiente
-                                        $lastCode = \App\Models\Church::latest('id')->value('code_church');
-                                        $lastIncrement = $lastCode ? intval(substr($lastCode, -4)) : 0;
-                                        $nextIncrement = str_pad($lastIncrement + 1, 4, '0', STR_PAD_LEFT);
+                                Forms\Components\Group::make()
+                                    ->schema(static::getPastorFormSchema())
+                                    ->columns(['md' => 3]),
+                            ])
+                    ])
+                    ->columnSpan(['lg' => fn (?Church $record) => $record === null ? 3 : 2]),
 
-                                        // Generar el nuevo código
-                                        $code = "M{$month}A{$year}C{$nextIncrement}";
+                Forms\Components\Section::make()
+                    ->schema([
+                        Forms\Components\Placeholder::make('created_at')
+                            ->label('Registrada el')
+                            ->content(fn (Church $record): ?string => $record->created_at?->diffForHumans()),
 
-                                        // Establecer el valor del campo "code_church"
-                                        $set('code_church', $code);
-                                    }
-                                })
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
-
-                            Forms\Components\TextInput::make('pastor_founding')
-                                ->label('Pastor Fundador')
-                                ->maxLength(255),
-
-                            Forms\Components\TextInput::make('code_church')
-                                ->label('Código de la Iglesia')
-                                ->required()
-                                ->disabled() // Deshabilitado para que no sea editable
-                                ->maxLength(255),
-
-                            Forms\Components\Radio::make('type_infrastructure')
-                                ->label('Tipo de Infraestructura')
-                                ->options([
-                                    'Propia' => 'Propia',
-                                    'Alquilada' => 'Alquilada',
-                                    'Prestada' => 'Prestada',
-                                    'Municipal' => 'Municipal',
-                                    'Condominio' => 'Condominio',
-                                    'INTI' => 'INTI',
-                                    'Invasión' => 'Invasión',
-                                    'Reservas' => 'Reservas',
-                                    'Baldío' => 'Baldío',
-                                ])
-                                ->columns(3),
-
-
-                            Forms\Components\Toggle::make('legalized')
-                                ->label('¿Legalizada?')
-                                ->required()
-                                ->reactive(), // Asegura que el campo reaccione a los cambios
-
-
-                            Forms\Components\TextInput::make('legal_entity_number')
-                                ->label('Número de Personería Jurídica')
-                                ->maxLength(55)
-                                ->visible(fn (callable $get) => $get('legalized')), // Visible solo si legalized es true
-
-                            Forms\Components\TextInput::make('number_rif')
-                                ->label('Número de RIF')
-                                ->maxLength(55)
-                                ->visible(fn (callable $get) => $get('legalized')), // Visible solo si legalized es true
-
-                            Forms\Components\Select::make('region_id')
-                                ->label('Región')
-                                ->relationship('region', 'name')
-                                ->required()
-                                ->reactive()
-                                ->native(false)
-                                ->afterStateUpdated(fn (callable $set) => $set('district_id', null))
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
-
-                            Forms\Components\Select::make('district_id')
-                                ->label('Distrito')
-                                ->options(fn (callable $get) =>
-                                    \App\Models\District::where('region_id', $get('region_id'))->pluck('name', 'id'))
-                                ->required()
-                                ->reactive()
-                                ->native(false)
-                                ->afterStateUpdated(fn (callable $set) => $set('sector_id', null))
-                                ->disabled(fn (callable $get) => !$get('region_id'))
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
-
-                            Forms\Components\Select::make('sector_id')
-                                ->label('Sector')
-                                ->options(fn (callable $get) =>
-                                    \App\Models\Sector::where('district_id', $get('district_id'))->pluck('name', 'id'))
-                                ->required()
-                                ->native(false)
-                                ->disabled(fn (callable $get) => !$get('district_id'))
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
-
-                            Forms\Components\Select::make('state_id')
-                                ->label('Estado')
-                                ->relationship('state', 'name')
-                                ->required()
-                                ->reactive() // Marca el campo como reactivo
-                                ->native(false)
-                                ->afterStateUpdated(fn (callable $set) => $set('city_id', null)),
-
-                            Forms\Components\Select::make('city_id')
-                                ->label('Municipio')
-                                ->options(function (callable $get) {
-                                    $stateId = $get('state_id'); // Obtén el estado seleccionado
-                                    if (!$stateId) {
-                                        return []; // Si no hay estado seleccionado, devuelve una lista vacía
-                                    }
-                                    return \App\Models\City::where('state_id', $stateId)->pluck('name', 'id'); // Filtra los municipios por el estado seleccionado
-                                })
-                                ->required()
-                                ->native(false)
-                                ->disabled(fn (callable $get) => !$get('state_id')),
-
-                            Forms\Components\Textarea::make('address')
-                                ->label('Dirección')
-                                ->columnSpanFull(),
-                        ])
-                        ->columns(2), // Dos columnas para los campos de esta sección
-
-                    Forms\Components\Wizard\Step::make('Datos de Membresía')
-                        ->schema([
-
-                            Forms\Components\TextInput::make('adults')
-                                ->label('Adultos')
-                                ->numeric()
-                                ->default(0)
-                                ->reactive()
-                                ->afterStateUpdated(function ($state, callable $get, callable $set) {
-                                    $children = $get('children') ?? 0;
-                                    $members = $state + $children;
-                                    $set('members', $members);
-
-                                    // Actualizar la categoría basada en el número de miembros
-                                    $category = \App\Models\CategoryChurch::findCategoryByMembers($members);
-                                    if ($category) {
-                                        $set('category_church_id', $category->id);
-                                    } else {
-                                        $set('category_church_id', null);
-                                    }
-                                })
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
-
-                            Forms\Components\TextInput::make('children')
-                                ->label('Niños')
-                                ->numeric()
-                                ->default(0)
-                                ->reactive()
-                                ->afterStateUpdated(function ($state, callable $get, callable $set) {
-                                    $adults = $get('adults') ?? 0;
-                                    $members = $state + $adults;
-                                    $set('members', $members);
-
-                                    // Actualizar la categoría basada en el número de miembros
-                                    $category = \App\Models\CategoryChurch::findCategoryByMembers($members);
-                                    if ($category) {
-                                        $set('category_church_id', $category->id);
-                                    } else {
-                                        $set('category_church_id', null);
-                                    }
-                                })
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
-
-                            Forms\Components\TextInput::make('baptized')
-                                ->label('Bautizados')
-                                ->numeric()
-                                ->default(0),
-
-                            Forms\Components\TextInput::make('to_baptize')
-                                ->label('Por Bautizar')
-                                ->numeric()
-                                ->default(0),
-
-                            Forms\Components\TextInput::make('holy_spirit')
-                                ->label('Llenos del Espíritu Santo')
-                                ->numeric()
-                                ->default(0),
-
-                            Forms\Components\TextInput::make('groups_cells')
-                                ->label('Grupos de Células')
-                                ->numeric()
-                                ->default(0),
-
-                            Forms\Components\TextInput::make('centers_preaching')
-                                ->label('Centros de Predicación')
-                                ->numeric()
-                                ->default(0),
-
-                            Forms\Components\TextInput::make('members')
-                                ->label('Miembros')
-                                ->numeric()
-                                ->default(0)
-                                ->disabled() // Campo deshabilitado para evitar edición manual
-                                ->dehydrated(),
-
-
-                            Forms\Components\Select::make('category_church_id')
-                                ->label('Categoría de la Iglesia')
-                                ->relationship('categoryChurch', 'name')
-                                ->searchable()
-                                ->required()
-                                ->disabled()
-                                ->dehydrated()
-                                ->reactive(), // Asegura que el campo reaccione a los cambios
-
-                            Forms\Components\Toggle::make('directive_local')
-                                ->label('¿Directiva Local?')
-                                ->default(false),
-
-                            Forms\Components\Toggle::make('co_pastor')
-                                ->label('¿Co-Pastor?')
-                                ->default(false),
-
-                            Forms\Components\Toggle::make('professionals')
-                                ->label('¿Profesionales?')
-                                ->default(false)
-                                ->reactive(), // Habilita la reactividad para cambios dinámicos
-
-                            Forms\Components\Section::make('Profesionales')
-                                ->schema([
-                                    Forms\Components\Repeater::make('name_professionals')
-                                        ->label('Nombres y Niveles Académicos')
-                                        ->schema([
-                                            Forms\Components\TextInput::make('name')
-                                                ->label('Nombre del Profesional')
-                                                ->required()
-                                                ->maxLength(255),
-
-                                            Forms\Components\Select::make('academic_level')
-                                                ->label('Nivel Académico')
-                                                ->options([
-                                                    'Técnico Superior Universitario (TSU)' => 'Técnico Superior Universitario (TSU)',
-                                                    'Licenciatura' => 'Licenciatura',
-                                                    'Ingeniería' => 'Ingeniería',
-                                                    'Especialización' => 'Especialización',
-                                                    'Maestría' => 'Maestría',
-                                                    'Doctorado' => 'Doctorado',
-                                                    'Otros' => 'Otros',
-                                                ])
-                                                ->required(),
-                                        ])
-                                        ->columns(2) // Organiza los campos en dos columnas
-                                        ->maxItems(8) // Límite de 8 profesionales
-                                        ->createItemButtonLabel('Agregar Profesional') // Texto del botón de agregar
-                                        ->default([]), // Asegura que el campo inicie vacío
-                                ])
-                                ->visible(fn (callable $get) => $get('professionals')) // Visible solo si el Toggle está activo
-                                ->collapsible(), // Permite colapsar la sección si hay muchos elementos
-
-                        ])
-                        ->columns(3), // Tres columnas para los campos de esta sección
-
-                    Forms\Components\Wizard\Step::make('Datos del Pastor')
-                        ->schema([
-
-                            Forms\Components\Select::make('pastor_current_id')
-                                ->label('Cédula del Pastor Actual')
-                                ->options(function () {
-                                    $user = Auth::user();
-
-                                    // Consulta base: Todos los pastores
-                                    $query = \App\Models\Pastor::query();
-
-                                    // Aplicar filtros según el rol del usuario
-                                    if ($user->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Superintendente Regional',
-                                        'Secretario Regional',
-                                        'Tesorero Regional',
-                                        'Supervisor Distrital',
-                                        'Presbítero Sectorial',
-                                        'Secretario Sectorial',
-                                        'Tesorero Sectorial',
-                                        ])) {
-                                        // Roles nacionales ven todas las cédulas, incluidos los pastores titulares
-                                        return $query->pluck('number_cedula', 'id');
-                                    }
-
-                                    if ($user->hasRole('Pastor')) {
-                                        // Un pastor estándar solo puede ver su propia cédula
-                                        $pastor = $user->pastor; // Obtener el pastor relacionado con el usuario
-                                        if ($pastor) {
-                                            return [$pastor->id => $pastor->number_cedula];
-                                        }
-                                        return [];
-                                    }
-
-                                    // Excluir pastores titulares asignados a otras iglesias para roles regionales, distritales y sectoriales
-                                    $query->whereDoesntHave('ministries', function ($q) {
-                                        $q->where('pastor_type_id', 1); // Excluir pastores ya asignados como titulares
-                                    });
-
-                                    // Obtener la jurisdicción del usuario
-                                    $jurisdiccion = $user->jurisdiccion;
-                                    if ($jurisdiccion) {
-                                        if ($user->hasAnyRole(['Secretario Regional'])) {
-                                            // Roles regionales ven pastores en su región
-                                            $query->where('region_id', $jurisdiccion->id);
-                                        } elseif ($user->hasAnyRole(['Secretario Distrital'])) {
-                                            // Roles distritales ven pastores en su distrito
-                                            $query->where('district_id', $jurisdiccion->id);
-                                        } elseif ($user->hasAnyRole(['Secretario Sectorial'])) {
-                                            // Roles sectoriales ven pastores en su sector
-                                            $query->where('sector_id', $jurisdiccion->id);
-                                        }
-                                    }
-
-                                    // Devolver las cédulas filtradas
-                                    return $query->pluck('number_cedula', 'id');
-                                })
-                                ->searchable()
-                                ->reactive()
-                                ->placeholder('Buscar por cédula')
-                                ->afterStateUpdated(function ($state, callable $set) {
-                                    // Limpiar todos los campos al iniciar o cuando se borre el campo
-                                    $set('pastor_current', null);
-                                    $set('number_cedula', null);
-                                    $set('email', null);
-                                    $set('phone', null);
-
-                                    if ($state) {
-                                        // Buscar el pastor seleccionado
-                                        $pastor = \App\Models\Pastor::find($state);
-                                        if ($pastor) {
-                                            // Verificar si el pastor ya está asignado como titular en otra iglesia
-                                            $alreadyAssigned = \App\Models\PastorMinistry::where('pastor_id', $state)
-                                                ->where('pastor_type_id', 1) // Tipo 1: Pastor Titular
-                                                ->exists();
-                                            if ($alreadyAssigned) {
-                                                // Si ya está asignado, mostrar una notificación de advertencia
-                                                Notification::make()
-                                                    ->title('Advertencia')
-                                                    ->body('Este pastor ya está asignado como Pastor Titular en otra iglesia.')
-                                                    ->warning()
-                                                    ->send();
-                                            }
-
-                                            // Llenar los campos automáticamente con los datos del pastor
-                                            $set('pastor_current', $pastor->name . ' ' . $pastor->lastname);
-                                            $set('number_cedula', $pastor->number_cedula);
-                                            $set('email', $pastor->email);
-                                            $set('phone', $pastor->phone_mobile ?? $pastor->phone_house);
-                                        }
-                                    }
-                                }),
-                                
-
-
-
-
-                            Forms\Components\TextInput::make('pastor_current')
-                                ->label('Nombre del Pastor Actual')
-                                ->reactive()
-                                ->disabled()
-                                ->dehydrated(),
-
-                            Forms\Components\TextInput::make('number_cedula')
-                                ->label('Cédula del Pastor Actual')
-                                ->reactive()
-                                ->disabled()
-                                ->dehydrated(),
-
-                            Forms\Components\Select::make('current_position_id')
-                                ->label('Posición Actual')
-                                ->relationship('currentPosition', 'name') // Relación con el modelo CurrentPosition
-                                ->searchable()
-                                ->reactive()
-                                ->placeholder('Selecciona una posición') // Mensaje por defecto
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Superintendente Regional',
-                                        'Secretario Regional',
-                                        'Tesorero Regional',
-                                        'Supervisor Distrital',
-                                        'Presbítero Sectorial',
-                                        'Secretario Sectorial',
-                                        'Tesorero Sectorial',
-                                    ]);
-                                })
-                                ->dehydrated(),
-                            
-
-                            Forms\Components\TextInput::make('email')
-                                ->label('Correo Electrónico')
-                                ->email()
-                                ->reactive()
-                                ->disabled()
-                                ->dehydrated(),
-
-                            Forms\Components\TextInput::make('phone')
-                                ->label('Teléfono')
-                                ->tel()
-                                ->reactive()
-                                ->disabled()
-                                ->dehydrated(),
-
-
-                            Forms\Components\Toggle::make('pastor_attach')
-                                ->label('¿Asignar Pastor Adjunto?')
-                                ->default(false)
-                                ->reactive()
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
-                            
-                            Forms\Components\Select::make('adjunct_pastor_id')
-                                ->label('Seleccionar Pastor Adjunto')
-                                ->options(function () {
-                                    return \App\Models\Pastor::whereHas('churches', function ($query) {
-                                        $query->where('church_pastor.pastor_type_id', 2); // Solo pastores con pastor_type_id = 2 (Adjunto)
-                                    })->pluck('number_cedula', 'id'); // Mostrar solo los pastores con número de cédula
-                                })
-                                ->searchable()
-                                ->reactive()
-                                ->placeholder('Buscar por cédula')
-                                ->visible(fn (callable $get) => $get('pastor_attach'))
-                                ->afterStateUpdated(function ($state, callable $set) {
-                                    if ($state) {
-                                        $pastor = \App\Models\Pastor::find($state);
-                            
-                                        if ($pastor) {
-                                            // Llenar los campos automáticamente con el nombre y apellido del pastor adjunto
-                                            $set('adjunct_name', $pastor->name);
-                                            $set('adjunct_lastname', $pastor->lastname);
-                            
-                                            // Validar si el pastor ya está asignado como Pastor Adjunto en otra iglesia
-                                            $alreadyAssigned = \App\Models\Church::whereHas('pastors', function ($query) use ($state) {
-                                                $query->where('pastor_id', $state)->where('church_pastor.pastor_type_id', 2); // Tipo 2: Pastor Adjunto
-                                            })->exists();
-                            
-                                            if ($alreadyAssigned) {
-                                                $set('adjunct_pastor_id', null); // Limpiar la selección
-                                                $set('adjunct_name', null); // Limpiar el nombre
-                                                $set('adjunct_lastname', null); // Limpiar el apellido
-                                                session()->flash('error', 'Este pastor ya está asignado como Pastor Adjunto en otra iglesia.');
-                                            }
-                                        }
-                                    } else {
-                                        // Si el estado es null (es decir, cuando el campo se limpia), limpiar los campos
-                                        $set('adjunct_name', null);
-                                        $set('adjunct_lastname', null);
-                                    }
-                                })
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
-                            
-                            Forms\Components\TextInput::make('adjunct_name')
-                                ->label('Nombre del Pastor Adjunto')
-                                ->reactive()
-                                ->disabled()
-                                ->dehydrated()
-                                ->visible(fn (callable $get) => $get('pastor_attach')),
-                            
-                            Forms\Components\TextInput::make('adjunct_lastname')
-                                ->label('Apellido del Pastor Adjunto')
-                                ->reactive()
-                                ->disabled()
-                                ->dehydrated()
-                                ->visible(fn (callable $get) => $get('pastor_attach')),
-                            
-
-
-                            Forms\Components\Toggle::make('pastor_assistant')
-                                ->label('¿Asignar Pastor Asistente?')
-                                ->default(false)
-                                ->reactive()
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
-                            
-                            Forms\Components\Select::make('assistant_pastor_id')
-                                ->label('Seleccionar Pastor Asistente')
-                                ->options(function () {
-                                    return \App\Models\Pastor::whereHas('churches', function ($query) {
-                                        $query->where('church_pastor.pastor_type_id', 3); // Solo pastores con pastor_type_id = 3 (Asistente)
-                                    })->pluck('number_cedula', 'id'); // Mostrar solo los pastores con número de cédula
-                                })
-                                ->searchable()
-                                ->reactive()
-                                ->placeholder('Buscar por cédula')
-                                ->visible(fn (callable $get) => $get('pastor_assistant'))
-                                ->afterStateUpdated(function ($state, callable $set) {
-                                    if ($state) {
-                                        $pastor = \App\Models\Pastor::find($state);
-                            
-                                        if ($pastor) {
-                                            // Llenar los campos automáticamente con el nombre y apellido del pastor asistente
-                                            $set('assistant_name', $pastor->name);
-                                            $set('assistant_lastname', $pastor->lastname);
-                            
-                                            // Validar si el pastor ya está asignado como Pastor Asistente a otra iglesia
-                                            $alreadyAssigned = \App\Models\Church::whereHas('pastors', function ($query) use ($state) {
-                                                $query->where('pastor_id', $state)->where('church_pastor.pastor_type_id', 3); // Tipo 3: Pastor Asistente
-                                            })->exists();
-                            
-                                            if ($alreadyAssigned) {
-                                                $set('assistant_pastor_id', null); // Limpiar la selección
-                                                $set('assistant_name', null); // Limpiar el nombre
-                                                $set('assistant_lastname', null); // Limpiar el apellido
-                                                session()->flash('error', 'Este pastor ya está asignado como Pastor Asistente en otra iglesia.');
-                                            }
-                                        }
-                                    } else {
-                                        // Si el estado es null (es decir, cuando el campo se limpia), limpiar los campos
-                                        $set('assistant_name', null);
-                                        $set('assistant_lastname', null);
-                                    }
-                                })
-                                ->disabled(function () {
-                                    // Deshabilitar el campo si el usuario no tiene los roles permitidos
-                                    return !Auth::user()->hasAnyRole([
-                                        'Administrador',
-                                        'Secretario Nacional',
-                                        'Tesorero Nacional',
-                                        'Secretario Regional',
-                                        'Secretario Sectorial', 
-                                    ]);
-                                })
-                                ->dehydrated(),
-                            
-                            Forms\Components\TextInput::make('assistant_name')
-                                ->label('Nombre del Pastor Asistente')
-                                ->reactive()
-                                ->disabled()
-                                ->dehydrated()
-                                ->visible(fn (callable $get) => $get('pastor_assistant')),
-                            
-                            Forms\Components\TextInput::make('assistant_lastname')
-                                ->label('Apellido del Pastor Asistente')
-                                ->reactive()
-                                ->disabled()
-                                ->dehydrated()
-                                ->visible(fn (callable $get) => $get('pastor_assistant')),
-                            
-
-                        ])
-                        ->columns(3), // Tres columnas para los campos de esta sección
-
-                ])
-                ->columnSpanFull(), // El wizard ocupa todo el ancho del formulario
-            ]);
+                        Forms\Components\Placeholder::make('updated_at')
+                            ->label('Última actualización')
+                            ->content(fn (Church $record): ?string => $record->updated_at?->diffForHumans()),
+                    ])
+                    ->columnSpan(['lg' => 1])
+                    ->hidden(fn (?Church $record) => $record === null),
+            ])
+            ->columns(3);
     }
 
+    public static function getStepFundacionales(): array
+    {
+        return [
+            Forms\Components\TextInput::make('name')
+                ->label('Nombre')
+                ->required()
+                ->prefix('IPUV')
+                ->maxLength(255)
+                ->disabled(fn () => !Auth::user()->hasAnyRole([
+                    'Administrador', 'Secretario Nacional', 'Tesorero Nacional',
+                    'Secretario Regional', 'Secretario Sectorial',
+                ]))
+                ->dehydrated(),
+                
+
+            // 📅 Fecha de apertura
+            Forms\Components\DatePicker::make('date_opening')
+                ->label('Fecha de Apertura')
+                ->required()
+                ->native(false)
+                ->reactive()
+                ->disabled(fn () => !Auth::user()->hasAnyRole([
+                    'Administrador', 'Secretario Nacional', 'Tesorero Nacional',
+                    'Secretario Regional', 'Secretario Sectorial',
+                ]))
+                ->dehydrated(),
+
+            // 🆔 Código de la iglesia (se llenará en el backend)
+            Forms\Components\TextInput::make('code_church')
+                ->label('Código de la Iglesia')
+                ->disabled() // no editable
+                //->required()
+                ->dehydrated()
+                ->unique(ignoreRecord: true),
+
+                
+
+            Forms\Components\TextInput::make('pastor_founding')
+                ->label('Pastor Fundador')
+                ->maxLength(255),
+                
+
+            Forms\Components\Radio::make('type_infrastructure')
+                ->label('Tipo de Infraestructura')
+                ->options([
+                    'Propia' => 'Propia', 'Alquilada' => 'Alquilada', 'Prestada' => 'Prestada',
+                    'Municipal' => 'Municipal', 'Condominio' => 'Condominio', 'INTI' => 'INTI',
+                    'Invasión' => 'Invasión', 'Reservas' => 'Reservas', 'Baldío' => 'Baldío',
+                ]),
+                
+
+            Forms\Components\Toggle::make('legalized')
+                ->label('¿Legalizada?')
+                ->required()
+                ->reactive(),
+
+            Forms\Components\TextInput::make('legal_entity_number')
+                ->label('Número de Personería Jurídica')
+                ->maxLength(55)
+                ->visible(fn (callable $get) => $get('legalized')),
+
+            Forms\Components\TextInput::make('number_rif')
+                ->label('Número de RIF')
+                ->maxLength(55)
+                ->visible(fn (callable $get) => $get('legalized')),
+
+            // Reemplaza tus 3 selects anteriores con esta línea:
+            ...TerritorialFormService::getTerritorialComponents(),
+
+            // Estado → Ciudad → Municipio → Parroquia
+            Forms\Components\Select::make('state_id')
+                ->label('Estado')
+                ->native(false)
+                ->options(fn () => \App\Models\State::pluck('name', 'id'))
+                ->searchable()
+                ->placeholder('Seleccione un estado...')
+                ->reactive()
+                ->required()
+                ->afterStateUpdated(fn ($state, Set $set) => [
+                    $set('city_id', null), $set('municipality_id', null), $set('parish_id', null),
+                ]),
+                
+
+            Forms\Components\Select::make('city_id')
+                ->label('Ciudad')
+                ->native(false)
+                ->options(fn (Get $get) =>
+                    \App\Models\City::where('state_id', $get('state_id'))->pluck('name', 'id'))
+                ->searchable()
+                ->placeholder('Seleccione una ciudad...')
+                ->reactive()
+                ->required()
+                ->disabled(fn (Get $get) => !$get('state_id'))
+                ->afterStateUpdated(fn ($state, Set $set) => [
+                    $set('municipality_id', null), $set('parish_id', null),
+                ]),
+                
+
+            Forms\Components\Select::make('municipality_id')
+                ->label('Municipio')
+                ->native(false)
+                ->options(fn (Get $get) =>
+                    \App\Models\Municipality::where('state_id', $get('state_id'))->pluck('name', 'id'))
+                ->searchable()
+                ->placeholder('Seleccione un municipio...')
+                ->reactive()
+                ->required()
+                ->disabled(fn (Get $get) => !$get('city_id'))
+                ->afterStateUpdated(fn ($state, Set $set) => $set('parish_id', null)),
+                
+
+            Forms\Components\Select::make('parish_id')
+                ->label('Parroquia')
+                ->native(false)
+                ->options(fn (Get $get) =>
+                    \App\Models\Parish::where('municipality_id', $get('municipality_id'))->pluck('name', 'id'))
+                ->searchable()
+                ->placeholder('Seleccione una parroquia...')
+                ->reactive()
+                ->required()
+                ->disabled(fn (Get $get) => !$get('municipality_id')),
+                
+
+            Forms\Components\Textarea::make('address')
+                ->label('Dirección'),
+                
+        ];
+    }
+
+    public static function getStepMembresia(): array
+    {
+        return [
+            Forms\Components\TextInput::make('adults')
+                ->label('Adultos')
+                ->numeric()
+                ->default(0)
+                ->reactive()
+                ->lazy()
+                ->afterStateUpdated(function ($state, callable $get, callable $set) {
+                    $children = $get('children') ?? 0;
+                    $members = $state + $children;
+                    $set('members', $members);
+
+                    $category = \App\Models\CategoryChurch::findCategoryByMembers($members);
+                    $set('category_church_id', $category?->id);
+                })
+                ->disabled(fn () => !Auth::user()->hasAnyRole([
+                    'Administrador', 'Secretario Nacional', 'Tesorero Nacional',
+                    'Secretario Regional', 'Secretario Sectorial',
+                ]))
+                ->dehydrated(),
+
+            Forms\Components\TextInput::make('children')
+                ->label('Niños')
+                ->numeric()
+                ->default(0)
+                ->reactive()
+                ->lazy()
+                ->afterStateUpdated(function ($state, callable $get, callable $set) {
+                    $adults = $get('adults') ?? 0;
+                    $members = $state + $adults;
+                    $set('members', $members);
+
+                    $category = \App\Models\CategoryChurch::findCategoryByMembers($members);
+                    $set('category_church_id', $category?->id);
+                })
+                ->disabled(fn () => !Auth::user()->hasAnyRole([
+                    'Administrador', 'Secretario Nacional', 'Tesorero Nacional',
+                    'Secretario Regional', 'Secretario Sectorial',
+                ]))
+                ->dehydrated(),
+
+            Forms\Components\TextInput::make('baptized')
+                ->label('Bautizados')
+                ->numeric()
+                ->default(0),
+
+            Forms\Components\TextInput::make('to_baptize')
+                ->label('Por Bautizar')
+                ->numeric()
+                ->default(0),
+
+            Forms\Components\TextInput::make('holy_spirit')
+                ->label('Llenos del Espíritu Santo')
+                ->numeric()
+                ->default(0),
+
+            Forms\Components\TextInput::make('groups_cells')
+                ->label('Grupos de Células')
+                ->numeric()
+                ->default(0),
+
+            Forms\Components\TextInput::make('centers_preaching')
+                ->label('Centros de Predicación')
+                ->numeric()
+                ->default(0),
+
+            Forms\Components\TextInput::make('members')
+                ->label('Miembros')
+                ->numeric()
+                ->default(0)
+                ->disabled()
+                ->dehydrated(),
+
+            Forms\Components\Select::make('category_church_id')
+                ->label('Categoría de la Iglesia')
+                ->relationship('categoryChurch', 'name')
+                ->searchable()
+                ->required()
+                ->disabled()
+                ->dehydrated()
+                ->reactive(),
+
+            Forms\Components\Toggle::make('directive_local')
+                ->label('¿Directiva Local?')
+                ->default(false),
+
+            Forms\Components\Toggle::make('co_pastor')
+                ->label('¿Co-Pastor?')
+                ->default(false),
+
+            Forms\Components\Toggle::make('professionals')
+                ->label('¿Profesionales?')
+                ->default(false)
+                ->reactive(),
+
+            Forms\Components\Section::make('Profesionales')
+                ->schema([
+                    Forms\Components\Repeater::make('name_professionals')
+                        ->label('Nombres y Niveles Académicos')
+                        ->schema([
+                            Forms\Components\TextInput::make('name')
+                                ->label('Nombre del Profesional')
+                                ->required()
+                                ->maxLength(255),
+
+                            Forms\Components\Select::make('academic_level')
+                                ->label('Nivel Académico')
+                                ->options([
+                                    'Técnico Superior Universitario (TSU)' => 'Técnico Superior Universitario (TSU)',
+                                    'Licenciatura' => 'Licenciatura',
+                                    'Ingeniería' => 'Ingeniería',
+                                    'Especialización' => 'Especialización',
+                                    'Maestría' => 'Maestría',
+                                    'Doctorado' => 'Doctorado',
+                                    'Otros' => 'Otros',
+                                ])
+                                ->required(),
+                        ])
+                        ->columns(2)
+                        ->maxItems(8)
+                        ->createItemButtonLabel('Agregar Profesional')
+                        ->default([]),
+                ])
+                ->visible(fn (callable $get) => $get('professionals'))
+                ->collapsible(),
+        ];
+    }
+
+    public static function getStepPastor(): array
+    {
+        return [
+            // Pastor Titular (se guarda en pastor_current y number_cedula)
+            Forms\Components\Select::make('pastor_current_id')
+                ->label('Cédula del Pastor Titular')
+                ->options(function (callable $get) {
+                    $sectorId = $get('sector_id');
+                    
+                    if (!$sectorId) {
+                        return [];
+                    }
+                    
+                    // Pastores titulares (tipos 1 y 4) del sector
+                    $pastorIds = \App\Models\PastorMinistry::whereIn('pastor_type_id', [1, 4])
+                        ->where('sector_id', $sectorId)
+                        ->pluck('pastor_id');
+                    
+                    // Excluir pastores cuya cédula ya está asignada en churches.number_cedula
+                    $assignedCedulas = \App\Models\Church::whereNotNull('number_cedula')
+                        ->where('number_cedula', '!=', '')
+                        ->pluck('number_cedula');
+                    
+                    $availablePastors = \App\Models\Pastor::whereIn('id', $pastorIds)
+                        ->whereNotIn('number_cedula', $assignedCedulas)
+                        ->get();
+                    
+                    return $availablePastors->pluck('number_cedula', 'id');
+                })
+                ->searchable()
+                ->reactive()
+                ->placeholder('Buscar por cédula del sector')
+                ->afterStateUpdated(function ($state, callable $set) {
+                    $set('pastor_current', null);
+                    $set('number_cedula', null);
+                    $set('email', null);
+                    $set('phone', null);
+
+                    if ($state) {
+                        $pastor = \App\Models\Pastor::find($state);
+                        if ($pastor) {
+                            $set('pastor_current', $pastor->name . ' ' . $pastor->lastname);
+                            $set('number_cedula', $pastor->number_cedula);
+                            $set('email', $pastor->email);
+                            $set('phone', $pastor->phone_mobile ?? $pastor->phone_house);
+                        }
+                    }
+                })
+                ->disabled(fn () => !Auth::user()->hasAnyRole([
+                    'Administrador', 'Secretario Nacional', 'Tesorero Nacional',
+                    'Secretario Regional', 'Secretario Sectorial',
+                ]))
+                ->dehydrated(),
+
+            Forms\Components\TextInput::make('pastor_current')
+                ->label('Nombre del Pastor Titular')
+                ->reactive()
+                ->disabled()
+                ->dehydrated(),
+
+            Forms\Components\TextInput::make('number_cedula')
+                ->label('Cédula del Pastor Titular')
+                ->reactive()
+                ->disabled()
+                ->dehydrated(),
+
+            Forms\Components\Select::make('current_position_id')
+                ->label('Posición Actual')
+                ->relationship('currentPosition', 'name')
+                ->searchable()
+                ->reactive()
+                ->placeholder('Selecciona una posición')
+                ->disabled(fn () => !Auth::user()->hasAnyRole([
+                    'Administrador', 'Secretario Nacional', 'Tesorero Nacional',
+                    'Superintendente Regional', 'Secretario Regional', 'Tesorero Regional',
+                    'Supervisor Distrital', 'Presbítero Sectorial', 'Secretario Sectorial',
+                    'Tesorero Sectorial',
+                ]))
+                ->dehydrated(),
+
+            Forms\Components\TextInput::make('email')
+                ->label('Correo Electrónico')
+                ->email()
+                ->reactive()
+                ->disabled()
+                ->dehydrated(),
+
+            Forms\Components\TextInput::make('phone')
+                ->label('Teléfono')
+                ->tel()
+                ->reactive()
+                ->disabled()
+                ->dehydrated(),
+
+            // Pastor Adjunto (se guarda en name_pastor_attach)
+            Forms\Components\Toggle::make('pastor_attach')
+                ->label('¿Asignar Pastor Adjunto?')
+                ->default(false)
+                ->reactive()
+                ->disabled(function (callable $get) {
+                    $members = $get('members') ?? 0;
+                    $hasPermission = Auth::user()->hasAnyRole([
+                        'Administrador', 'Secretario Nacional', 'Tesorero Nacional',
+                        'Secretario Regional', 'Secretario Sectorial',
+                    ]);
+                    
+                    return !$hasPermission || $members < 51;
+                })
+                ->helperText(function (callable $get) {
+                    $members = $get('members') ?? 0;
+                    if ($members < 51) {
+                        return '⚠️ Se requieren al menos 51 miembros para asignar Pastor Adjunto (Actual: ' . $members . ')';
+                    }
+                    return 'Disponible para iglesias con 51+ miembros';
+                })
+                ->dehydrated(),
+
+            Forms\Components\Select::make('adjunct_pastor_select')
+                ->label('Seleccionar Pastor Adjunto')
+                ->options(function (callable $get) {
+                    $sectorId = $get('sector_id');
+                    $members = $get('members') ?? 0;
+                    
+                    if (!$sectorId || $members < 51) {
+                        return [];
+                    }
+                    
+                    // Pastores adjuntos (tipo 2) del sector
+                    $pastorIds = \App\Models\PastorMinistry::where('pastor_type_id', 2)
+                        ->where('sector_id', $sectorId)
+                        ->pluck('pastor_id');
+                    
+                    // Obtener nombres ya asignados como adjuntos
+                    $assignedNames = \App\Models\Church::whereNotNull('name_pastor_attach')
+                        ->where('name_pastor_attach', '!=', '')
+                        ->pluck('name_pastor_attach');
+                    
+                    // Mostrar pastores disponibles
+                    return \App\Models\Pastor::whereIn('id', $pastorIds)
+                        ->get()
+                        ->filter(function ($pastor) use ($assignedNames) {
+                            $fullName = $pastor->name . ' ' . $pastor->lastname;
+                            return !$assignedNames->contains($fullName);
+                        })
+                        ->pluck('number_cedula', 'id');
+                })
+                ->searchable()
+                ->reactive()
+                ->placeholder('Buscar por cédula del sector')
+                ->visible(fn (callable $get) => $get('pastor_attach'))
+                ->afterStateUpdated(function ($state, callable $set) {
+                    $set('name_pastor_attach', null);
+
+                    if ($state) {
+                        $pastor = \App\Models\Pastor::find($state);
+                        if ($pastor) {
+                            $set('name_pastor_attach', $pastor->name . ' ' . $pastor->lastname);
+                        }
+                    }
+                })
+                ->disabled(fn () => !Auth::user()->hasAnyRole([
+                    'Administrador', 'Secretario Nacional', 'Tesorero Nacional',
+                    'Secretario Regional', 'Secretario Sectorial',
+                ]))
+                ->dehydrated(false), // No guardar este campo, solo es para selección
+
+            Forms\Components\TextInput::make('name_pastor_attach')
+                ->label('Nombre del Pastor Adjunto')
+                ->reactive()
+                ->disabled()
+                ->dehydrated()
+                ->visible(fn (callable $get) => $get('pastor_attach')),
+
+            // Pastor Asistente (se guarda en name_pastor_assistant)
+            Forms\Components\Toggle::make('pastor_assistant')
+                ->label('¿Asignar Pastor Asistente?')
+                ->default(false)
+                ->reactive()
+                ->disabled(function (callable $get) {
+                    $members = $get('members') ?? 0;
+                    $hasPermission = Auth::user()->hasAnyRole([
+                        'Administrador', 'Secretario Nacional', 'Tesorero Nacional',
+                        'Secretario Regional', 'Secretario Sectorial',
+                    ]);
+                    
+                    return !$hasPermission || $members < 101;
+                })
+                ->helperText(function (callable $get) {
+                    $members = $get('members') ?? 0;
+                    if ($members < 101) {
+                        return '⚠️ Se requieren al menos 101 miembros para asignar Pastor Asistente (Actual: ' . $members . ')';
+                    }
+                    return 'Disponible para iglesias con 101+ miembros';
+                })
+                ->dehydrated(),
+
+            Forms\Components\Select::make('assistant_pastor_select')
+                ->label('Seleccionar Pastor Asistente')
+                ->options(function (callable $get) {
+                    $sectorId = $get('sector_id');
+                    $members = $get('members') ?? 0;
+                    
+                    if (!$sectorId || $members < 101) {
+                        return [];
+                    }
+                    
+                    // Pastores asistentes (tipo 3) del sector
+                    $pastorIds = \App\Models\PastorMinistry::where('pastor_type_id', 3)
+                        ->where('sector_id', $sectorId)
+                        ->pluck('pastor_id');
+                    
+                    // Obtener nombres ya asignados como asistentes
+                    $assignedNames = \App\Models\Church::whereNotNull('name_pastor_assistant')
+                        ->where('name_pastor_assistant', '!=', '')
+                        ->pluck('name_pastor_assistant');
+                    
+                    // Mostrar pastores disponibles
+                    return \App\Models\Pastor::whereIn('id', $pastorIds)
+                        ->get()
+                        ->filter(function ($pastor) use ($assignedNames) {
+                            $fullName = $pastor->name . ' ' . $pastor->lastname;
+                            return !$assignedNames->contains($fullName);
+                        })
+                        ->pluck('number_cedula', 'id');
+                })
+                ->searchable()
+                ->reactive()
+                ->placeholder('Buscar por cédula del sector')
+                ->visible(fn (callable $get) => $get('pastor_assistant'))
+                ->afterStateUpdated(function ($state, callable $set) {
+                    $set('name_pastor_assistant', null);
+
+                    if ($state) {
+                        $pastor = \App\Models\Pastor::find($state);
+                        if ($pastor) {
+                            $set('name_pastor_assistant', $pastor->name . ' ' . $pastor->lastname);
+                        }
+                    }
+                })
+                ->disabled(fn () => !Auth::user()->hasAnyRole([
+                    'Administrador', 'Secretario Nacional', 'Tesorero Nacional',
+                    'Secretario Regional', 'Secretario Sectorial',
+                ]))
+                ->dehydrated(false), // No guardar este campo, solo es para selección
+
+            Forms\Components\TextInput::make('name_pastor_assistant')
+                ->label('Nombre del Pastor Asistente')
+                ->reactive()
+                ->disabled()
+                ->dehydrated()
+                ->visible(fn (callable $get) => $get('pastor_assistant')),
+        ];
+    }
+
+    
+    /**
+     * Define the table schema for the Church resource.
+     */
     public static function table(Table $table): Table
     {
         
@@ -855,14 +801,72 @@ class ChurchResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                //
+                // Filtros personalizados
+                ...self::getUbicacionGeograficaFilters(),
             ])
             ->actions([
-                Tables\Actions\EditAction::make(),
+                ViewAction::make()
+                    ->icon('heroicon-o-eye')
+                    ->label(false)
+                    ->tooltip('Ver Iglesia')
+                    ->color('primary')
+                    ->size('md')
+                    ->modalHeading(fn ($record) => 'Detalles de: ' . $record->name),
+
+                EditAction::make()
+                    ->icon('heroicon-s-pencil-square')    
+                    ->label(false)
+                    ->tooltip('Editar Iglesia')
+                    ->color('warning')
+                    ->size('md')
+                    ->visible(function ($record) {
+                        $user = auth()->user();
+                        
+                        // Si el usuario tiene alguno de los roles privilegiados, puede editar cualquier registro
+                        if ($user?->hasAnyRole([
+                            'Secretario Nacional',
+                            'Secretario Regional',
+                            'Secretario Sectorial',
+                            'Tesorero Nacional',
+                            'Tesorero Sectorial',
+                        ])) {
+                            return true;
+                        }
+                        
+                        // Si no tiene roles privilegiados, solo puede editar su propio registro
+                        // Comparamos el username del usuario autenticado con el number_cedula del pastor
+                        return $user && $record && $user->username === $record->number_cedula;
+                    }),
             ])
+            ->recordUrl(function ($record) {
+                $user = auth()->user();
+
+                // Solo roles administrativos pueden redirigir directamente a la edición
+                if ($user?->hasAnyRole([
+                    'Administrador',
+                    'Secretario Nacional',
+                    'Secretario Regional',
+                    'Secretario Sectorial',
+                    'Supervisor Distrital',
+                ])) {
+                    return ChurchResource::getUrl('edit', ['record' => $record]);
+                }
+
+                return null;
+            })
+            ->defaultSort('name', 'asc')
+            
             ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                BulkActionGroup::make([
+                    DeleteBulkAction::make()
+                        ->label('Eliminar Iglesias Seleccionadas')
+                        ->visible(function () {
+                            $user = auth()->user();
+                            return $user?->hasAnyRole([
+                                'Administrador',
+                                'Tesorero Nacional',
+                            ]);
+                        }),
                 ]),
             ]);
     }
@@ -882,4 +886,23 @@ class ChurchResource extends Resource
             'edit' => Pages\EditChurch::route('/{record}/edit'),
         ];
     }
+
+    /** @return Forms\Components\Component[] */
+    public static function getDetailsFormSchema(): array
+    {
+        return self::getStepFundacionales(); // o copia aquí directamente si no usas Wizard
+    }
+
+    public static function getMembresiaFormSchema(): array
+    {
+        return self::getStepMembresia(); // ya extraído o por extraer
+    }
+
+    public static function getPastorFormSchema(): array
+    {
+        return self::getStepPastor(); // ya extraído o por extraer
+    }
+
+
+
 }

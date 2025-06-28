@@ -8,6 +8,7 @@ use Intervention\Image\Facades\Image;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Builder;
 use App\Services\AccessControlService;
+use App\Services\PastorAssignmentService;
 use App\Traits\PastorAccessTrait;
 use Illuminate\Database\Eloquent\Model;
 use App\Notifications\PastorNotification;
@@ -28,6 +29,8 @@ class Pastor extends Model
         'sector_id',
         'state_id',
         'city_id',
+        'municipality_id',
+        'parish_id',
         'name',
         'lastname',
         'gender_id',
@@ -74,6 +77,25 @@ class Pastor extends Model
             AccessControlService::applyFilters($query);
         });
 
+        //static::saving(function (Pastor $pastor) {
+            // Verificamos si alguno de los campos de “ministerio” cambió
+            //if ($pastor->isDirty(['pastor_income_id', 'pastor_type_id', 'start_date_ministry', 'current_position_id'])) {
+                //(new PastorAssignmentService)->assignLicenceAndLevel($pastor);
+            //}
+        //});
+
+        // Evento que se dispara antes de guardar (crear o actualizar) el modelo
+        //static::saving(function (Pastor $pastor) {
+            // Ejemplo: llamar siempre a la asignación automática
+            //(new PastorAssignmentService)->assignLicenceAndLevel($pastor);
+
+            // O, si deseas respetar roles y permitir que solo Admin/Secretario
+            // edite manualmente, podrías condicionar:
+            // if (! (new PastorAssignmentService)->canManuallyEdit()) {
+            //     (new PastorAssignmentService)->assignLicenceAndLevel($pastor);
+            // }
+        //});
+
     }
 
     public function getActivitylogOptions(): LogOptions
@@ -113,6 +135,16 @@ class Pastor extends Model
     public function city()
     {
         return $this->belongsTo(City::class);
+    }
+
+    public function municipality()
+    {
+        return $this->belongsTo(Municipality::class);
+    }
+
+    public function parish()
+    {
+        return $this->belongsTo(Parish::class);
     }
 
     public function gender()
@@ -160,7 +192,12 @@ class Pastor extends Model
         return $this->hasMany(PastorMinistry::class);
     }
 
-    
+    public function currentMinistry()
+    {
+        return $this->hasOne(\App\Models\PastorMinistry::class, 'pastor_id')->where('active', true);
+    }
+
+
 
     // Relación con PastorMinistry
     public function ministry()
@@ -178,12 +215,11 @@ class Pastor extends Model
         return $this->hasOne(\App\Models\PastorMinistry::class, 'pastor_id');
     }
 
-    
-
     public function church()
     {
         return $this->belongsTo(Church::class);
     }
+
 
     public function pastorType()
     {
@@ -235,7 +271,31 @@ class Pastor extends Model
         return static::query()->whereRaw('0 = 1'); // Por defecto, no devuelve nada
     }
 
+    
+    public function getFullNameAttribute(): string
+    {
+        $name = trim($this->name ?? '');
+        $lastname = trim($this->lastname ?? '');
+        
+        if ($name && $lastname) {
+            return $name . ' ' . $lastname;
+        }
+        
+        if ($name) {
+            return $name;
+        }
+        
+        if ($lastname) {
+            return $lastname;
+        }
+        
+        return 'Sin nombre';
+    }
 
+    public function offeringReports()
+    {
+        return $this->hasMany(OfferingReport::class);
+    }
 
     public function churches()
     {

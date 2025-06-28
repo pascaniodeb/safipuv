@@ -127,36 +127,71 @@ class MinistryRelationManager extends RelationManager
                         ->relationship('pastorIncome', 'name')
                         ->native(false)
                         ->placeholder('Selecciona un ingreso')
-                        ->reactive() // 🔹 Permite que al cambiar este campo, otros valores dependientes se recalculen
-                        ->afterStateUpdated(fn (callable $set, callable $get) => 
-                            $set('pastor_licence_id', \App\Services\PastorLicenceService::determineLicence(
-                                $get('pastor_income_id'), 
-                                $get('pastor_type_id'),
-                                $get('start_date_ministry')
-                            ))
-                        ) // 🔹 Actualiza automáticamente la licencia
+                        ->reactive()
+                        ->afterStateUpdated(function (callable $set, callable $get) {
+                            try {
+                                $pastor = $this->ownerRecord;
+                        
+                                // Validación fuerte de existencia y contenido
+                                if (! $pastor || blank($pastor->start_date_ministry)) {
+                                    return;
+                                }
+                        
+                                $incomeId = $get('pastor_income_id');
+                                $typeId = $get('pastor_type_id');
+                        
+                                // Verificamos que ambos campos estén llenos
+                                if (blank($incomeId) || blank($typeId)) {
+                                    return;
+                                }
+                        
+                                $licenceId = \App\Services\PastorAssignmentService::determineLicence(
+                                    $incomeId,
+                                    $typeId,
+                                    $pastor->start_date_ministry
+                                );
+                        
+                                $set('pastor_licence_id', $licenceId);
+                        
+                            } catch (\Throwable $e) {
+                                \Log::error('Error en afterStateUpdated en Relation Manager Ministry: ' . $e->getMessage());
+                            }
+                        })
                         ->disabled(fn () => !Auth::user()->hasAnyRole([
                             'Administrador',
                             'Secretario Nacional',
                             'Tesorero Nacional',
                             'Secretario Regional',
-                            'Secretario Sectorial', 
+                            'Secretario Sectorial',
                         ]))
                         ->dehydrated(),
+                    
                 
                     Forms\Components\Select::make('pastor_type_id')
                         ->label('Tipo de Pastor')
                         ->relationship('pastorType', 'name')
                         ->native(false)
                         ->placeholder('Seleccione un tipo de pastor')
-                        ->reactive() // 🔹 Permite que al cambiar este campo, la licencia también se recalcule
-                        ->afterStateUpdated(fn (callable $set, callable $get) => 
-                            $set('pastor_licence_id', \App\Services\PastorLicenceService::determineLicence(
-                                $get('pastor_income_id'), 
+                        ->reactive()
+                        ->afterStateUpdated(function (callable $set, callable $get) {
+                            // Obtenemos el Pastor padre (ownerRecord) para acceder a la fecha de inicio
+                            $pastor = $this->ownerRecord;
+                    
+                            // Si por alguna razón no existe la fecha, retornamos o usamos un valor por defecto
+                            if (! $pastor->start_date_ministry) {
+                                return;
+                            }
+                    
+                            // Llamamos a PastorAssignmentService::determineLicence
+                            $licenceId = \App\Services\PastorAssignmentService::determineLicence(
+                                $get('pastor_income_id'),
                                 $get('pastor_type_id'),
-                                $get('start_date_ministry')
-                            ))
-                        ) // 🔹 Se recalcula automáticamente la licencia pastoral
+                                $pastor->start_date_ministry
+                            );
+                    
+                            // Asignamos el resultado al campo 'pastor_licence_id'
+                            $set('pastor_licence_id', $licenceId);
+                        })
                         ->disabled(fn () => !Auth::user()->hasAnyRole([
                             'Administrador',
                             'Secretario Nacional',
@@ -165,11 +200,13 @@ class MinistryRelationManager extends RelationManager
                             'Secretario Sectorial', 
                         ]))
                         ->dehydrated(),
+                    
                 
 
     
                     Forms\Components\Select::make('church_id')
                         ->label('Iglesia Asociada')
+                        ->native(false)
                         ->options(\App\Models\Church::pluck('name', 'id'))
                         ->searchable()
                         ->placeholder('Selecciona una iglesia')
@@ -226,6 +263,8 @@ class MinistryRelationManager extends RelationManager
                                 $set('sector_id', $church->sector_id);
                                 $set('state_id', $church->state_id);
                                 $set('city_id', $church->city_id);
+                                $set('municipality_id', $church->municipality_id);
+                                $set('parish_id', $church->parish_id);
                                 $set('address', $church->address);
                             } else {
                                 // 🧹 Limpiar los campos relacionados si se deselecciona la iglesia
@@ -235,6 +274,8 @@ class MinistryRelationManager extends RelationManager
                                 $set('sector_id', null);
                                 $set('state_id', null);
                                 $set('city_id', null);
+                                $set('municipality_id', null);
+                                $set('parish_id', null);
                                 $set('address', null);
                             }
                         })
@@ -294,6 +335,20 @@ class MinistryRelationManager extends RelationManager
                     ->label('Ciudad')
                     ->relationship('city', 'name')
                     ->placeholder('Selecciona una ciudad')
+                    ->disabled() // Campo visible pero deshabilitado
+                    ->dehydrated(), // Se encarga de enviar los datos al database
+
+                Forms\Components\Select::make('municipality_id')
+                    ->label('Municipio')
+                    ->relationship('municipality', 'name')
+                    ->placeholder('Selecciona un municipio')
+                    ->disabled() // Campo visible pero deshabilitado
+                    ->dehydrated(), // Se encarga de enviar los datos al database
+
+                Forms\Components\Select::make('parish_id')
+                    ->label('Parroquia')
+                    ->relationship('parish', 'name')
+                    ->placeholder('Selecciona una parroquia')
                     ->disabled() // Campo visible pero deshabilitado
                     ->dehydrated(), // Se encarga de enviar los datos al database
 
@@ -422,16 +477,32 @@ class MinistryRelationManager extends RelationManager
                     ->searchable()
                     ->options(function (callable $get) {
                         $positionTypeId = $get('position_type_id');
-                        if ($positionTypeId && $positionTypeId != 5) { // Suponiendo que el ID para "No Aplica" es 0
+                        if ($positionTypeId && $positionTypeId != 5) { 
                             return \App\Models\CurrentPosition::where('position_type_id', $positionTypeId)
                                 ->pluck('name', 'id');
                         }
                         return [];
                     })
-                    //->required()
                     ->placeholder('Selecciona una posición')
-                    ->disabled(fn (callable $get) => $get('disable_current_position') ?? false) // Deshabilita si está configurado
+                    ->disabled(fn (callable $get) => $get('disable_current_position') ?? false)
                     ->native(false)
+                    ->reactive() // 🔹 Para recalcular el nivel en tiempo real
+                    ->afterStateUpdated(function (callable $set, callable $get) {
+                        // Obtenemos el Pastor padre (ownerRecord) y su fecha de inicio
+                        $pastor = $this->ownerRecord;
+                        if (! $pastor->start_date_ministry) {
+                            return; 
+                        }
+                
+                        // Calculamos el nuevo nivel con base en la fecha de ministerio y la nueva posición
+                        $levelId = \App\Services\PastorAssignmentService::determineLevel(
+                            $pastor->start_date_ministry,
+                            $get('current_position_id')
+                        );
+                
+                        // Asignamos el nuevo nivel al campo 'pastor_level_id'
+                        $set('pastor_level_id', $levelId);
+                    })
                     ->disabled(function () {
                         // Deshabilitar el campo si el usuario no tiene los roles permitidos
                         return !Auth::user()->hasAnyRole([
@@ -439,10 +510,11 @@ class MinistryRelationManager extends RelationManager
                             'Secretario Nacional',
                             'Tesorero Nacional',
                             'Secretario Regional',
-                            'Secretario Sectorial', 
+                            'Secretario Sectorial',
                         ]);
                     })
                     ->dehydrated(),
+                
                     //->columnSpan(['default' => 3, 'md' => 1]),
 
 
@@ -451,28 +523,50 @@ class MinistryRelationManager extends RelationManager
                     Forms\Components\Select::make('pastor_licence_id')
                         ->label('Licencia Pastoral')
                         ->relationship('pastorLicence', 'name')
-                        ->placeholder('Selecciona una licencia')
-                        ->default(function (callable $get) {
-                            return PastorLicenceService::determineLicence(
-                                $get('pastor_income_id'),
-                                $get('pastor_type_id'),
-                                $get('start_date_ministry')
+                        ->native(false)
+                        ->default(function ($livewire) {
+                            // "ownerRecord" es el Pastor asociado al Relation Manager
+                            $pastor = $livewire->ownerRecord;
+                    
+                            // Si el usuario es Admin o Secretario, permitimos que sobreescriba manualmente
+                            if (Auth::user()->hasAnyRole(['Administrador', 'Secretario Nacional'])) {
+                                // Si en la URL (request) viene un pastor_licence_id, lo usamos
+                                if (request('pastor_licence_id')) {
+                                    return request('pastor_licence_id');
+                                }
+                            }
+                    
+                            // Si no, calculamos automáticamente usando PastorAssignmentService
+                            return \App\Services\PastorAssignmentService::determineLicence(
+                                $pastor->pastor_income_id,
+                                $pastor->pastor_type_id,
+                                $pastor->start_date_ministry
                             );
                         })
                         ->reactive()
-                        ->native(false)
-                        ->afterStateUpdated(function (callable $set, callable $get) {
-                            // ✅ Solo recalcula si no se ha editado manualmente
-                            if (!is_numeric($get('pastor_licence_id'))) {
-                                $set('pastor_licence_id', PastorLicenceService::determineLicence(
-                                    $get('pastor_income_id'),
-                                    $get('pastor_type_id'),
-                                    $get('start_date_ministry')
-                                ));
+                        ->afterStateUpdated(function ($state, callable $get, callable $set, $livewire) {
+                            // Si la licencia ingresada no es un ID numérico, volvemos a forzar el cálculo
+                            if (! is_numeric($state)) {
+                                $pastor = $livewire->ownerRecord;
+                    
+                                $licenceId = \App\Services\PastorAssignmentService::determineLicence(
+                                    $pastor->pastor_income_id,
+                                    $pastor->pastor_type_id,
+                                    $pastor->start_date_ministry
+                                );
+                    
+                                // Sobrescribimos con la licencia calculada
+                                $set('pastor_licence_id', $licenceId);
                             }
                         })
-                        ->disabled(fn () => !Auth::user()->hasAnyRole(['Administrador', 'Secretario Nacional']))
-                        ->dehydrated(),
+                        ->disabled(fn () => ! Auth::user()->hasAnyRole(['Administrador','Secretario Nacional']))
+                        ->dehydrated(), 
+                
+                
+                
+                
+                
+
 
 
                 
@@ -498,56 +592,50 @@ class MinistryRelationManager extends RelationManager
                         ->dehydrated(),
 
                     Forms\Components\Select::make('pastor_level_id')
-                        ->label('Nivel Pastoral por Fecha')
+                        ->label('Nivel Pastoral')
                         ->relationship('pastorLevel', 'name')
                         ->placeholder('Selecciona un nivel')
-                        ->default(function (callable $get) {
-                            // Obtener la fecha de inicio del ministerio
-                            $startDate = $get('start_date_ministry');
-                            $currentPositionId = $get('current_position_id');
+                        ->default(function ($livewire) {
+                            // "ownerRecord" es el Pastor padre
+                            $pastor = $livewire->ownerRecord;
                     
-                            if ($startDate) {
-                                // Calcular los años de ministerio
-                                $startDate = Carbon::parse($startDate)->startOfDay();
-                                $today = now()->startOfDay();
-                                $yearsInMinistry = $startDate->diffInYears($today);
-                    
-                                // Asignar nivel basado en la posición actual (current_position_id)
-                                if ($currentPositionId == 17) {
-                                    return \App\Models\PastorLevel::where('name', 'PLATINO PLUS')->value('id');
-                                } elseif (in_array($currentPositionId, [2, 14, 15])) {
-                                    return \App\Models\PastorLevel::where('name', 'DIAMANTE')->value('id');
-                                } elseif ($currentPositionId == 1) {
-                                    return \App\Models\PastorLevel::where('name', 'ZAFIRO')->value('id');
-                                }
-                    
-                                // Asignar nivel basado en los años de ministerio
-                                if ($yearsInMinistry <= 6) {
-                                    return \App\Models\PastorLevel::where('name', 'BRONCE')->value('id');
-                                } elseif ($yearsInMinistry >= 7 && $yearsInMinistry <= 12) {
-                                    return \App\Models\PastorLevel::where('name', 'PLATA')->value('id');
-                                } elseif ($yearsInMinistry >= 13 && $yearsInMinistry <= 20) {
-                                    return \App\Models\PastorLevel::where('name', 'TITANIO')->value('id');
-                                } elseif ($yearsInMinistry >= 21 && $yearsInMinistry <= 35) {
-                                    return \App\Models\PastorLevel::where('name', 'ORO')->value('id');
-                                } elseif ($yearsInMinistry >= 36) {
-                                    return \App\Models\PastorLevel::where('name', 'PLATINO')->value('id');
+                            // Si el usuario es Admin o Secretario, podemos respetar un valor manual del request
+                            if (Auth::user()->hasAnyRole(['Administrador', 'Secretario Nacional'])) {
+                                if (request('pastor_level_id')) {
+                                    return request('pastor_level_id');
                                 }
                             }
                     
-                            return null; // Ningún nivel asignado
+                            // Caso contrario, calculamos automáticamente con PastorAssignmentService
+                            return \App\Services\PastorAssignmentService::determineLevel(
+                                $pastor->start_date_ministry,
+                                $pastor->current_position_id
+                            );
                         })
                         ->reactive()
+                        ->afterStateUpdated(function ($state, callable $get, callable $set, $livewire) {
+                            // Si el valor no es numérico, forzamos el cálculo
+                            if (! is_numeric($state)) {
+                                $pastor = $livewire->ownerRecord;
+                    
+                                $levelId = \App\Services\PastorAssignmentService::determineLevel(
+                                    $pastor->start_date_ministry,
+                                    $pastor->current_position_id
+                                );
+                    
+                                $set('pastor_level_id', $levelId);
+                            }
+                        })
                         ->native(false)
                         ->disabled(function () {
-                            // Deshabilitar el campo si el usuario no tiene los roles permitidos
+                            // Sólo Admin/Secretario pueden editar
                             return !Auth::user()->hasAnyRole([
                                 'Administrador',
                                 'Secretario Nacional',
-                                'Tesorero Nacional',
                             ]);
                         })
                         ->dehydrated(),
+                    
                         
                     
                     

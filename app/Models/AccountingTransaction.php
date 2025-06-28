@@ -5,13 +5,14 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use App\Traits\HasAccountingAccess;
 use Carbon\Carbon;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
 
 class AccountingTransaction extends Model
 {
-    use HasFactory, LogsActivity;
+    use HasFactory, LogsActivity, HasAccountingAccess;
 
     protected $fillable = [
         'accounting_id',
@@ -20,14 +21,14 @@ class AccountingTransaction extends Model
         'amount',
         'currency',
         'description',
-        'month',
+        'transaction_date',
         'user_id',
         'receipt_path',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
-        'month' => 'string',
+        'transaction_date' => 'date',
     ];
     public function getActivitylogOptions(): LogOptions
     {
@@ -59,6 +60,8 @@ class AccountingTransaction extends Model
         );
     }
 
+    
+
     protected static function boot()
     {
         parent::boot();
@@ -71,60 +74,131 @@ class AccountingTransaction extends Model
         });
     }
 
+    protected static function booted()
+    {
+        static::saving(function ($record) {
+            if ($record->is_closed) {
+                throw new \Exception('No se pueden guardar registros en un mes cerrado.');
+            }
+        });
+
+        static::deleting(function ($record) {
+            if ($record->is_closed) {
+                throw new \Exception('No se pueden eliminar registros en un mes cerrado.');
+            }
+        });
+    }
+
+
+
     public static function closeMonth(string $month, int $accountingId)
     {
-        $nextMonth = Carbon::createFromFormat('Y-m', $month)->addMonth()->format('Y-m');
-        $currencies = ['VES', 'USD', 'COP']; // Divisas soportadas
-        $userId = auth()->id();
+        $nextMonth = Carbon::createFromFormat('Y-m', $month)->addMonth();
+        $currencies = ['VES', 'USD', 'COP'];
+        $user = auth()->user();
+        $userId = $user->id;
+
+        // Determinar el código contable según la contabilidad
+        $codeMap = [
+            2 => 'I-100', // Sectorial
+            3 => 'I-200', // Distrital
+            4 => 'I-300', // Regional
+            6 => 'I-500', // Nacional
+        ];
+
+        $code = $codeMap[$accountingId] ?? null;
+
+        if (!$code) {
+            throw new \Exception("No se ha definido un código contable para la contabilidad ID {$accountingId}");
+        }
+
+        $accountingCodeId = AccountingCode::where('code', $code)->value('id');
+
+        if (!$accountingCodeId) {
+            throw new \Exception("No se encontró el código contable '{$code}' en la base de datos.");
+        }
+
+        // Obtener los IDs de tipo de movimiento
+        $incomeMovementId = Movement::where('type', 'Ingreso')->value('id');
+        $expenseMovementId = Movement::where('type', 'Egreso')->value('id');
 
         foreach ($currencies as $currency) {
-            // Verificar si ya existe un saldo inicial en el siguiente mes para esta divisa
             $exists = self::where('accounting_id', $accountingId)
-                ->where('month', $nextMonth)
+                ->whereDate('transaction_date', $nextMonth->copy()->startOfMonth())
                 ->where('currency', $currency)
                 ->where('description', "Saldo inicial de {$month}")
                 ->exists();
 
             if ($exists) {
-                continue; // Saltar si ya fue cerrado en esta divisa
+                continue;
             }
 
-            // Obtener IDs de movimientos (Ingreso y Egreso)
-            $incomeMovementId = Movement::where('type', 'Ingreso')->value('id');
-            $expenseMovementId = Movement::where('type', 'Egreso')->value('id');
-
-            // Calcular ingresos y egresos en la divisa específica
             $totalIncome = self::where('accounting_id', $accountingId)
-                ->where('month', $month)
+                ->whereMonth('transaction_date', Carbon::parse($month)->month)
+                ->whereYear('transaction_date', Carbon::parse($month)->year)
                 ->where('currency', $currency)
                 ->where('movement_id', $incomeMovementId)
                 ->sum('amount');
 
             $totalExpense = self::where('accounting_id', $accountingId)
-                ->where('month', $month)
+                ->whereMonth('transaction_date', Carbon::parse($month)->month)
+                ->whereYear('transaction_date', Carbon::parse($month)->year)
                 ->where('currency', $currency)
                 ->where('movement_id', $expenseMovementId)
                 ->sum('amount');
 
-            $closingBalance = $totalIncome - $totalExpense;
+            $saldo = $totalIncome - $totalExpense;
 
-            // Solo registrar si hay saldo disponible
-            if ($closingBalance != 0) {
+            if ($saldo != 0) {
                 self::create([
                     'accounting_id' => $accountingId,
-                    'accounting_code_id' => AccountingCode::where('description', 'Saldo Inicial')->value('id'),
-                    'movement_id' => $incomeMovementId, // Ingreso
+                    'accounting_code_id' => $accountingCodeId,
+                    'movement_id' => $incomeMovementId,
                     'currency' => $currency,
-                    'amount' => $closingBalance,
+                    'amount' => $saldo,
                     'description' => "Saldo inicial de {$month}",
-                    'month' => $nextMonth,
+                    'transaction_date' => $nextMonth->copy()->startOfMonth(),
                     'user_id' => $userId,
+                    'region_id' => $user->region_id,
+                    'district_id' => $user->district_id,
+                    'sector_id' => $user->sector_id,
                 ]);
             }
         }
 
-        return "✅ Cierre de {$month} completado para todas las divisas.";
+        // Cerrar el mes actual
+        self::where('accounting_id', $accountingId)
+            ->whereMonth('transaction_date', Carbon::parse($month)->month)
+            ->whereYear('transaction_date', Carbon::parse($month)->year)
+            ->update(['is_closed' => true]);
+
+        return "✅ El mes {$month} ha sido cerrado correctamente con los saldos iniciales registrados.";
     }
+
+
+    public static function isMonthClosed(string $month, int $accountingId): bool
+    {
+        return self::where('accounting_id', $accountingId)
+            ->whereMonth('transaction_date', '=', Carbon::createFromFormat('Y-m', $month)->month)
+            ->whereYear('transaction_date', '=', Carbon::createFromFormat('Y-m', $month)->year)
+            ->where('is_closed', true)
+            ->exists();
+    }
+
+    // En tu modelo AccountingTransaction (o helper)
+    public static function getMesAbierto(): ?string
+    {
+        return self::where('is_closed', false)
+            ->orderByDesc('transaction_date')
+            ->selectRaw("DATE_FORMAT(transaction_date, '%Y-%m') as mes")
+            ->value('mes');
+    }
+
+
+
+
+
+    
     
 
     public function region()

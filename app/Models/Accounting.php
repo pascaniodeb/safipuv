@@ -31,4 +31,10 @@ class Accounting extends Model
     {
         return $this->hasMany(AccountingCode::class);
     }
+
+    public function transactions()
+    {
+        return $this->hasMany(\App\Models\AccountingTransaction::class, 'accounting_id');
+    }
+
 }

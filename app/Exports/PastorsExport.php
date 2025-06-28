@@ -25,7 +25,8 @@ class PastorsExport implements FromCollection, WithHeadings, WithMapping
         $query = Pastor::with([
             'region', 'district', 'sector', 'state', 'city',
             'gender', 'nationality', 'bloodType', 'academicLevel',
-            'maritalStatus', 'housingType'
+            'maritalStatus', 'housingType',
+            'ministry' // Incluimos la relación
         ]);
 
         // 🔹 Si el usuario tiene rol nacional, puede ver todos los pastores.
@@ -73,7 +74,8 @@ class PastorsExport implements FromCollection, WithHeadings, WithMapping
             "Tipo de Vivienda", "Dirección",
             "Región", "Distrito", "Sector", "Estado", "Ciudad",
             "Género", "Nacionalidad", "Tipo de Sangre", "Estado Civil",
-            "Fecha de Creación", "Última Actualización"
+            "Fecha de Creación", "Última Actualización",
+            "Tipo de Cargo", "Cargo Actual" // Nuevas columnas
         ];
     }
 
@@ -115,6 +117,10 @@ class PastorsExport implements FromCollection, WithHeadings, WithMapping
             optional($pastor->maritalStatus)->name ?? "No especificado",
             $pastor->created_at,
             $pastor->updated_at,
+            $pastor->ministry?->positionType?->name ?? "No especificado",
+            $pastor->ministry?->currentPosition?->name ?? "No especificado",
+            // Agregamos las nuevas columnas. Utilizamos optional() para evitar errores en caso de que no exista el registro.
+            
         ];
     }
 }

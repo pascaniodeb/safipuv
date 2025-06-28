@@ -36,5 +36,5 @@ class PastorLicence extends Model
     {
         return $this->hasMany(PastorLevel::class, 'licence_id');
     }
-}
 
+}

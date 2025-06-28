@@ -40,6 +40,14 @@ class OfferingReport extends Model
         'grand_total_bs',
         'remarks',
         'status', // ✅ Asegurar que está aquí
+        'church_without_pastor',
+        'pastor_name_manual',
+        'historical_note',
+    ];
+
+    protected $casts = [
+        // ... casts existentes
+        'church_without_pastor' => 'boolean',
     ];
 
     public static function generateReportNumber()
@@ -118,7 +126,7 @@ class OfferingReport extends Model
                 });
 
                 // Asignamos el número de reporte final
-                $report->number_report = self::generateReportNumber();
+                //$report->number_report = self::generateReportNumber();
             }
         });
         
@@ -136,8 +144,15 @@ class OfferingReport extends Model
         });
 
         // Si se actualiza, recalcular la distribución
-        static::updated(function ($offeringReport) {
-            $offeringReport->recalculateDistribution();
+        // O puedes usar updated(), dependiendo de tu necesidad
+        static::updated(function (OfferingReport $report) {
+            // Opcional: Verificar si ciertos campos cambian, p.ej. 'amount' u otros
+            // if ($report->isDirty('alguno_de_tus_campos')) {
+            //     $report->recalculateDistribution();
+            // }
+
+            // Si quieres que se recalcule siempre que se haga update, sin verificación:
+            $report->recalculateDistribution();
         });
 
         // Si se borra, eliminar distribuciones asociadas
@@ -221,8 +236,73 @@ class OfferingReport extends Model
         }
     }
 
+    /**
+     * Obtener el nombre del pastor para mostrar
+     * 
+     * @return string
+     */
+    public function getPastorDisplayNameAttribute(): string
+    {
+        // Caso 1: Iglesia sin pastor
+        if ($this->church_without_pastor && $this->pastor_name_manual) {
+            return $this->pastor_name_manual . ' (Sin Pastor Asignado)';
+        }
+        
+        // Caso 2: Pastor asignado
+        if ($this->pastor) {
+            // Verificar que el pastor tenga nombre
+            $displayName = $this->pastor->full_name ?? 'Pastor sin nombre';
+            
+            // Verificar si el pastor fue trasladado
+            if ($this->sector_id && $this->pastor->sector_id && $this->pastor->sector_id !== $this->sector_id) {
+                $newSector = $this->pastor->sector?->name ?? 'Otro sector';
+                return $displayName . " (Trasladado a {$newSector})";
+            }
+            
+            // Pastor activo en el sector
+            return $displayName;
+        }
+        
+        // Caso 3: Sin información - SIEMPRE retornar string
+        return 'Sin información de pastor';
+    }
 
+    /**
+     * Obtener el estado del pastor
+     * 
+     * @return string
+     */
+    public function getPastorStatusAttribute(): string
+    {
+        if ($this->church_without_pastor) {
+            return 'sin_pastor';
+        }
+        
+        if ($this->pastor && $this->sector_id && $this->pastor->sector_id && $this->pastor->sector_id !== $this->sector_id) {
+            return 'trasladado';
+        }
+        
+        if ($this->pastor) {
+            return 'activo';
+        }
+        
+        return 'sin_info';
+    }
 
+    /**
+     * Obtener información del badge de estado
+     * 
+     * @return array
+     */
+    public function getPastorStatusBadgeAttribute(): array
+    {
+        return match($this->pastor_status) {
+            'sin_pastor' => ['color' => 'warning', 'label' => 'Sin Pastor'],
+            'trasladado' => ['color' => 'danger', 'label' => 'Trasladado'],
+            'activo' => ['color' => 'success', 'label' => 'Activo'],
+            default => ['color' => 'gray', 'label' => 'Sin Info'],
+        };
+    }
 
 
 
@@ -321,4 +401,5 @@ class OfferingReport extends Model
     {
         return $this->hasMany(TreasuryAllocation::class);
     }
+
 }

@@ -3,8 +3,10 @@
 namespace App\Filament\Resources\PastorResource\Pages;
 
 use App\Filament\Resources\PastorResource;
+use App\Services\PastorAssignmentService;
 use Filament\Notifications\Notification;
 use Filament\Notifications\Actions\Action;
+use Illuminate\Support\Facades\Auth;
 use Filament\Actions;
 use Filament\Resources\Pages\EditRecord;
 
@@ -12,12 +14,23 @@ class EditPastor extends EditRecord
 {
     protected static string $resource = PastorResource::class;
 
+    protected function afterSave()
+    {
+        (new PastorAssignmentService)->assignLicenceAndLevel($this->record);
+    }
+
     protected function getHeaderActions(): array
     {
         return [
-            Actions\DeleteAction::make(),
+            Actions\DeleteAction::make()
+                ->visible(fn () => auth()->user()?->hasAnyRole([
+                    'Administrador',
+                    'Secretario Nacional',
+                    'Tesorero Nacional',
+                ]))
         ];
     }
+    
     protected function getRedirectUrl(): string
     {
         // Redirigir al índice del recurso

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
+use App\Services\MessagingService;
 use Spatie\Permission\Traits\HasRoles;
 use Filament\Models\Contracts\HasAvatar;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -75,9 +76,10 @@ class User extends Authenticatable implements HasAvatar, FilamentUser
         return $this->belongsTo(Nationality::class, 'nationality_id');
     }
 
-    public function pastor()
+    public function pastor(): BelongsTo
     {
-        return $this->belongsTo(Pastor::class, 'number_cedula', 'username');
+        // users.username  ≘  pastors.number_cedula
+        return $this->belongsTo(Pastor::class, 'username', 'number_cedula');
     }
 
 
@@ -123,6 +125,24 @@ class User extends Authenticatable implements HasAvatar, FilamentUser
     public function scopeInSector($query, $sectorId)
     {
         return $query->where('sector_id', $sectorId);
+    }
+
+    // Agregar al modelo User
+    public function conversations()
+    {
+        return $this->belongsToMany(Conversation::class, 'conversation_participants')
+                    ->withPivot(['joined_at', 'last_read_at', 'is_active'])
+                    ->withTimestamps();
+    }
+
+    public function sentMessages()
+    {
+        return $this->hasMany(Message::class, 'sender_id');
+    }
+
+    public static function getAvailableParticipants(User $user)
+    {
+        return app(MessagingService::class)->getAvailableParticipants($user);
     }
 
     public function getFilamentAvatarUrl(): ?string

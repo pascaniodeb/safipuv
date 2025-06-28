@@ -11,6 +11,18 @@ class EditAccountingTransaction extends EditRecord
 {
     protected static string $resource = AccountingTransactionResource::class;
 
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        $accounting = \App\Models\Accounting::find($data['accounting_id']);
+
+        $data['region_id'] = $accounting->region_id;
+        $data['district_id'] = $accounting->district_id;
+        $data['sector_id'] = $accounting->sector_id;
+
+        return $data;
+    }
+
+
     protected function getHeaderActions(): array
     {
         return [

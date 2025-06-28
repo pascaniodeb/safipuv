@@ -454,6 +454,7 @@ class UserResource extends Resource
             'index' => Pages\ListUsers::route('/'),
             'create' => Pages\CreateUser::route('/create'),
             'edit' => Pages\EditUser::route('/{record}/edit'),
+            'sync-pastores-usuarios' => Pages\SyncPastoresUsuarios::route('/sync-pastores-usuarios'),
         ];
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PastorResource\Pages;
 
 use App\Filament\Resources\PastorResource;
+use App\Services\PastorAssignmentService;
 use Filament\Notifications\Notification;
 use Filament\Actions;
 use Filament\Resources\Pages\CreateRecord;
@@ -10,6 +11,11 @@ use Filament\Resources\Pages\CreateRecord;
 class CreatePastor extends CreateRecord
 {
     protected static string $resource = PastorResource::class;
+
+    protected function afterCreate()
+    {
+        (new PastorAssignmentService)->assignLicenceAndLevel($this->record);
+    }
 
     protected function getRedirectUrl(): string
     {

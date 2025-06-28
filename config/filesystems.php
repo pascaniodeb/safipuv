@@ -36,6 +36,12 @@ return [
             'serve' => true,
             'throw' => false,
         ],
+        'message_attachments' => [
+            'driver' => 'local',
+            'root' => storage_path('app/message-attachments'),
+            'url' => env('APP_URL').'/storage/message-attachments',
+            'visibility' => 'private',
+        ],
 
         'public' => [
             'driver' => 'local',

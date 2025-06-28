@@ -26,6 +26,8 @@ class PastorMinistry extends Model
         'sector_id',
         'state_id',
         'city_id',
+        'municipality_id',
+        'parish_id',
         'address',
         'abisop',
         'iblc',
@@ -61,22 +63,25 @@ class PastorMinistry extends Model
     protected static function booted()
     {
         static::creating(function ($pastorMinistry) {
-            // 🔹 Asignar automáticamente la licencia al CREAR un pastor
-            $pastorMinistry->pastor_licence_id = PastorLicenceService::determineLicence(
-                $pastorMinistry->pastor_income_id,
-                $pastorMinistry->pastor_type_id,
-                $pastorMinistry->start_date_ministry
-            );
+            if (is_null($pastorMinistry->pastor_licence_id)) {
+                $pastorMinistry->pastor_licence_id = \App\Services\PastorAssignmentService::determineLicence(
+                    $pastorMinistry->pastor_income_id,
+                    $pastorMinistry->pastor_type_id,
+                    $pastorMinistry->start_date_ministry
+                );
+            }
         });
-
+        
         static::updating(function ($pastorMinistry) {
-            // 🔹 Asignar automáticamente la licencia al ACTUALIZAR un pastor
-            $pastorMinistry->pastor_licence_id = PastorLicenceService::determineLicence(
-                $pastorMinistry->pastor_income_id,
-                $pastorMinistry->pastor_type_id,
-                $pastorMinistry->start_date_ministry
-            );
+            if (is_null($pastorMinistry->pastor_licence_id)) {
+                $pastorMinistry->pastor_licence_id = \App\Services\PastorAssignmentService::determineLicence(
+                    $pastorMinistry->pastor_income_id,
+                    $pastorMinistry->pastor_type_id,
+                    $pastorMinistry->start_date_ministry
+                );
+            }
         });
+        
     }
 
 
@@ -94,11 +99,6 @@ class PastorMinistry extends Model
     public function pastorIncome()
     {
         return $this->belongsTo(PastorIncome::class);
-    }
-
-    public function church()
-    {
-        return $this->belongsTo(Church::class);
     }
 
     public function region()
@@ -126,24 +126,19 @@ class PastorMinistry extends Model
         return $this->belongsTo(City::class);
     }
 
-    public function courseType()
+    public function municipality()
     {
-        return $this->belongsTo(CourseType::class);
+        return $this->belongsTo(Municipality::class);
+    }
+
+    public function parish()
+    {
+        return $this->belongsTo(Parish::class);
     }
 
     public function pastorLicence()
     {
-        return $this->belongsTo(PastorLicence::class);
-    }
-
-    public function positionType()
-    {
-        return $this->belongsTo(PositionType::class);
-    }
-
-    public function currentPosition()
-    {
-        return $this->belongsTo(CurrentPosition::class);
+        return $this->belongsTo(\App\Models\PastorLicence::class);
     }
 
     public function pastorLevel()
@@ -151,10 +146,46 @@ class PastorMinistry extends Model
         return $this->belongsTo(PastorLevel::class);
     }
 
-    public function pastorLevelVip()
+    public function income()
     {
-        return $this->belongsTo(PastorLevelVip::class);
+        return $this->belongsTo(\App\Models\PastorIncome::class, 'pastor_income_id');
     }
+
+    public function type()
+    {
+        return $this->belongsTo(\App\Models\PastorType::class, 'pastor_type_id');
+    }
+
+    public function licence()
+    {
+        return $this->belongsTo(\App\Models\PastorLicence::class, 'pastor_licence_id');
+    }
+
+    public function level()
+    {
+        return $this->belongsTo(\App\Models\PastorLevel::class, 'pastor_level_id');
+    }
+
+    public function courseType()
+    {
+        return $this->belongsTo(\App\Models\CourseType::class, 'course_type_id');
+    }
+
+    public function positionType()
+    {
+        return $this->belongsTo(\App\Models\PositionType::class, 'position_type_id');
+    }
+
+    public function currentPosition()
+    {
+        return $this->belongsTo(\App\Models\CurrentPosition::class, 'current_position_id');
+    }
+
+    public function church()
+    {
+        return $this->belongsTo(\App\Models\Church::class, 'church_id');
+    }
+
 
 
 

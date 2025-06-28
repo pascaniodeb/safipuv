@@ -63,40 +63,47 @@ class AccessControlService
     /**
      * Filtra los pastores según el rol del usuario autenticado.
      */
-    protected static function filterPastorsQuery(Builder $query, $user)
+    protected static function filterPastorsQuery(Builder $query, $user = null)
     {
-        // 🔹 Obtener el ID del usuario autenticado
-        $user = Auth::user();
+        // 🔹 Si no se pasa el usuario, tomar el autenticado (solo si existe)
+        $user = $user ?? Auth::user();
 
-        // 🔹 Verificar si el usuario es un Pastor
+        // 🔒 Si no hay usuario autenticado (por ejemplo, en consola), devolver todo sin filtrar
+        if (! $user) {
+            return $query;
+        }
+
+        // 🔹 Si el usuario es Pastor (solo ve sus propios datos)
         if ($user->hasRole('Pastor')) {
             return $query->whereHas('user', function ($q) use ($user) {
                 $q->where('id', $user->id);
             });
         }
 
-        // 🔹 Si el usuario tiene un rol nacional, puede ver todos los registros
+        // 🔹 Rol nacional: ve todo
         if ($user->hasAnyRole(self::$nationalRoles)) {
             return $query;
         }
 
-        // 🔹 Si el usuario tiene un rol regional, filtrar por región
+        // 🔹 Rol regional: filtra por región
         if ($user->hasAnyRole(self::$regionalRoles)) {
             return $query->where('region_id', $user->region_id);
         }
 
-        // 🔹 Si el usuario es Supervisor Distrital, filtrar por distrito
+        // 🔹 Supervisor Distrital: filtra por distrito
         if ($user->hasRole('Supervisor Distrital')) {
             return $query->where('district_id', $user->district_id);
         }
 
-        // 🔹 Si el usuario tiene un rol sectorial, filtrar por sector
+        // 🔹 Rol sectorial: filtra por sector
         if ($user->hasAnyRole(self::$sectorRoles)) {
             return $query->where('sector_id', $user->sector_id);
         }
 
-        return $query->whereRaw('1 = 0'); // ❌ Bloquear si no tiene permisos
+        // ❌ Si no tiene ningún rol válido, bloquear
+        return $query->whereRaw('1 = 0');
     }
+
 
     /**
      * Filtra las iglesias según el rol del usuario autenticado.
@@ -105,6 +112,12 @@ class AccessControlService
     {
         // 🔹 Obtener el usuario autenticado
         $user = Auth::user();
+
+        // 🔒 Si no hay usuario autenticado (por ejemplo, en consola), devolver todo sin filtrar
+        if (! $user) {
+            return $query;
+        }
+
 
         // 🔹 Si el usuario es un Pastor, solo puede ver la iglesia que pastorea
         if ($user->hasRole('Pastor')) {
